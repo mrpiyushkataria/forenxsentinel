@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ForenX-NGINX Sentinel - Advanced NGINX Forensic Dashboard
-Backend Server with FastAPI - FIXED VERSION
+Backend Server with FastAPI - COMPLETE FIXED VERSION
 """
 import os
 import json
@@ -86,20 +86,22 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-# FIXED: Changed from POST to allow both GET and POST for testing
 @app.post("/api/upload-logs")
-@app.get("/api/upload-logs")  # For testing
 async def upload_logs(
     files: List[UploadFile] = File(...),
     log_type: str = Form("auto")
 ):
-    """Upload and parse NGINX log files - FIXED ENDPOINT"""
+    """Upload and parse NGINX log files"""
     results = {
         "files_processed": [],
         "total_records": 0,
         "alerts_found": 0,
         "file_hashes": []
     }
+    
+    # Clear existing data
+    logs_data["parsed_logs"] = []
+    logs_data["alerts"] = []
     
     for file in files:
         try:
@@ -182,7 +184,10 @@ async def upload_logs(
 @app.get("/api/metrics")
 async def get_metrics(time_range: str = "24h"):
     """Get aggregated metrics for dashboard - FIXED"""
+    logger.info(f"Getting metrics for time_range: {time_range}")
+    
     if not logs_data["parsed_logs"]:
+        logger.info("No parsed logs found, returning zeros")
         return {
             "total_requests": 0,
             "unique_ips": 0,
@@ -192,6 +197,8 @@ async def get_metrics(time_range: str = "24h"):
             "error_rate": 0.0
         }
     
+    logger.info(f"Total logs in memory: {len(logs_data['parsed_logs'])}")
+    
     # Filter by time range
     now = datetime.now(timezone.utc)
     cutoff = get_cutoff_time(time_range)
@@ -200,6 +207,8 @@ async def get_metrics(time_range: str = "24h"):
         log for log in logs_data["parsed_logs"] 
         if hasattr(log, 'timestamp') and log.timestamp >= cutoff
     ]
+    
+    logger.info(f"Filtered logs after time filter: {len(filtered_logs)}")
     
     if not filtered_logs:
         return {
@@ -213,28 +222,34 @@ async def get_metrics(time_range: str = "24h"):
     
     # Calculate metrics
     total_requests = len(filtered_logs)
-    unique_ips = len(set(log.client_ip for log in filtered_logs))
+    unique_ips = len(set(log.client_ip for log in filtered_logs if hasattr(log, 'client_ip')))
     
     # Calculate bytes safely
     total_bytes = 0
     for log in filtered_logs:
         if hasattr(log, 'bytes_sent') and log.bytes_sent:
-            total_bytes += log.bytes_sent
+            try:
+                total_bytes += int(log.bytes_sent)
+            except:
+                pass
     
     # Calculate status codes safely
     status_4xx = 0
     status_5xx = 0
     for log in filtered_logs:
         if hasattr(log, 'status'):
-            status = log.status
-            if 400 <= status < 500:
-                status_4xx += 1
-            elif 500 <= status < 600:
-                status_5xx += 1
+            try:
+                status = int(log.status)
+                if 400 <= status < 500:
+                    status_4xx += 1
+                elif 500 <= status < 600:
+                    status_5xx += 1
+            except:
+                pass
     
     error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
     
-    return {
+    metrics = {
         "total_requests": total_requests,
         "unique_ips": unique_ips,
         "total_bytes": total_bytes,
@@ -242,6 +257,9 @@ async def get_metrics(time_range: str = "24h"):
         "status_5xx": status_5xx,
         "error_rate": error_rate
     }
+    
+    logger.info(f"Returning metrics: {metrics}")
+    return metrics
 
 @app.get("/api/logs")
 async def get_logs(
@@ -254,18 +272,22 @@ async def get_logs(
     """Get filtered logs with pagination"""
     logs = logs_data["parsed_logs"]
     
+    logger.info(f"Getting logs page {page}, limit {limit}, total logs: {len(logs)}")
+    
     # Apply filters
     filtered_logs = []
     for log in logs:
         include = True
         
-        if ip_filter and ip_filter not in log.client_ip:
-            include = False
+        if ip_filter and hasattr(log, 'client_ip'):
+            if ip_filter not in log.client_ip:
+                include = False
         
-        if status_filter and str(log.status) != status_filter:
-            include = False
+        if status_filter and hasattr(log, 'status'):
+            if str(log.status) != status_filter:
+                include = False
         
-        if time_start:
+        if time_start and hasattr(log, 'timestamp'):
             try:
                 start_time = datetime.fromisoformat(time_start.replace('Z', '+00:00'))
                 if log.timestamp < start_time:
@@ -282,8 +304,21 @@ async def get_logs(
     end = start + limit
     paginated_logs = filtered_logs[start:end]
     
-    return {
-        "logs": [log.dict() for log in paginated_logs],
+    # Convert to dict with proper serialization
+    log_dicts = []
+    for log in paginated_logs:
+        try:
+            log_dict = log.dict()
+            # Ensure timestamp is serializable
+            if hasattr(log, 'timestamp'):
+                log_dict['timestamp'] = log.timestamp.isoformat()
+            log_dicts.append(log_dict)
+        except Exception as e:
+            logger.error(f"Error serializing log: {e}")
+            continue
+    
+    response = {
+        "logs": log_dicts,
         "pagination": {
             "page": page,
             "limit": limit,
@@ -291,24 +326,34 @@ async def get_logs(
             "pages": (total + limit - 1) // limit if limit > 0 else 0
         }
     }
+    
+    logger.info(f"Returning {len(log_dicts)} logs")
+    return response
 
 @app.get("/api/alerts")
 async def get_alerts(limit: int = 50):
     """Get security alerts"""
     alerts = logs_data["alerts"]
     
+    logger.info(f"Getting alerts, limit {limit}, total alerts: {len(alerts)}")
+    
     # Sort by timestamp (newest first)
-    alerts.sort(key=lambda x: x.timestamp, reverse=True)
+    alerts.sort(key=lambda x: x.timestamp if hasattr(x, 'timestamp') else datetime.now(timezone.utc), reverse=True)
     alerts = alerts[:limit]
     
     # Convert to dict with proper serialization
     alert_dicts = []
     for alert in alerts:
-        alert_dict = alert.dict()
-        alert_dict["timestamp"] = alert.timestamp.isoformat()
-        alert_dict["attack_type"] = alert.attack_type.value
-        alert_dicts.append(alert_dict)
+        try:
+            alert_dict = alert.dict()
+            alert_dict["timestamp"] = alert.timestamp.isoformat() if hasattr(alert, 'timestamp') else datetime.now(timezone.utc).isoformat()
+            alert_dict["attack_type"] = alert.attack_type.value if hasattr(alert, 'attack_type') else "Unknown"
+            alert_dicts.append(alert_dict)
+        except Exception as e:
+            logger.error(f"Error serializing alert: {e}")
+            continue
     
+    logger.info(f"Returning {len(alert_dicts)} alerts")
     return {"alerts": alert_dicts}
 
 @app.get("/api/top-data")
@@ -317,7 +362,10 @@ async def get_top_data(
     limit: int = 10
 ):
     """Get top data for charts"""
+    logger.info(f"Getting top data for category: {category}")
+    
     if not logs_data["parsed_logs"]:
+        logger.info("No parsed logs found, returning empty")
         return {"labels": [], "values": []}
     
     logs = logs_data["parsed_logs"]
@@ -326,56 +374,64 @@ async def get_top_data(
         # Top IPs by request count
         ip_counts = {}
         for log in logs:
-            ip_counts[log.client_ip] = ip_counts.get(log.client_ip, 0) + 1
+            if hasattr(log, 'client_ip'):
+                ip = log.client_ip
+                ip_counts[ip] = ip_counts.get(ip, 0) + 1
         
         top_data = sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return {
+        result = {
             "labels": [item[0] for item in top_data],
             "values": [item[1] for item in top_data]
         }
-    
+        
     elif category == "endpoints":
         # Top endpoints by request count
         endpoint_counts = {}
         for log in logs:
-            endpoint_counts[log.endpoint] = endpoint_counts.get(log.endpoint, 0) + 1
+            if hasattr(log, 'endpoint'):
+                endpoint = log.endpoint
+                endpoint_counts[endpoint] = endpoint_counts.get(endpoint, 0) + 1
         
         top_data = sorted(endpoint_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return {
+        result = {
             "labels": [item[0] for item in top_data],
             "values": [item[1] for item in top_data]
         }
-    
+        
     elif category == "user_agents":
         # Top user-agents
         ua_counts = {}
         for log in logs:
-            if log.user_agent and log.user_agent != '-':
+            if hasattr(log, 'user_agent') and log.user_agent and log.user_agent != '-':
                 ua = log.user_agent[:50]
                 ua_counts[ua] = ua_counts.get(ua, 0) + 1
         
         top_data = sorted(ua_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return {
+        result = {
             "labels": [item[0] for item in top_data],
             "values": [item[1] for item in top_data]
         }
-    
+        
     elif category == "status_codes":
         # Status code distribution
         status_counts = {}
         for log in logs:
-            status = str(log.status)
-            status_counts[status] = status_counts.get(status, 0) + 1
+            if hasattr(log, 'status'):
+                status = str(log.status)
+                status_counts[status] = status_counts.get(status, 0) + 1
         
         # Sort by status code
         sorted_codes = sorted(status_counts.items(), key=lambda x: x[0])
-        return {
+        result = {
             "labels": [item[0] for item in sorted_codes],
             "values": [item[1] for item in sorted_codes]
         }
-    
+        
     else:
-        return {"labels": [], "values": []}
+        result = {"labels": [], "values": []}
+    
+    logger.info(f"Returning top data: {len(result['labels'])} items")
+    return result
 
 @app.get("/api/timeline")
 async def get_timeline(
@@ -383,15 +439,20 @@ async def get_timeline(
     time_range: str = "24h"
 ):
     """Get timeline data for charts"""
+    logger.info(f"Getting timeline data, interval: {interval}, time_range: {time_range}")
+    
     if not logs_data["parsed_logs"]:
+        logger.info("No parsed logs found, returning empty")
         return {"timestamps": [], "request_counts": []}
     
     # Filter by time
     cutoff = get_cutoff_time(time_range)
     filtered_logs = [
         log for log in logs_data["parsed_logs"] 
-        if log.timestamp >= cutoff
+        if hasattr(log, 'timestamp') and log.timestamp >= cutoff
     ]
+    
+    logger.info(f"Filtered logs for timeline: {len(filtered_logs)}")
     
     if not filtered_logs:
         return {"timestamps": [], "request_counts": []}
@@ -400,24 +461,28 @@ async def get_timeline(
     timeline = {}
     
     for log in filtered_logs:
-        if interval == "minute":
-            key = log.timestamp.strftime("%Y-%m-%d %H:%M")
-        elif interval == "hour":
-            key = log.timestamp.strftime("%Y-%m-%d %H:00")
-        elif interval == "day":
-            key = log.timestamp.strftime("%Y-%m-%d")
-        else:
-            key = log.timestamp.strftime("%Y-%m-%d %H:%M")
-        
-        timeline[key] = timeline.get(key, 0) + 1
+        if hasattr(log, 'timestamp'):
+            if interval == "minute":
+                key = log.timestamp.strftime("%Y-%m-%d %H:%M")
+            elif interval == "hour":
+                key = log.timestamp.strftime("%Y-%m-%d %H:00")
+            elif interval == "day":
+                key = log.timestamp.strftime("%Y-%m-%d")
+            else:
+                key = log.timestamp.strftime("%Y-%m-%d %H:%M")
+            
+            timeline[key] = timeline.get(key, 0) + 1
     
     # Sort by time
     sorted_timeline = sorted(timeline.items(), key=lambda x: x[0])
     
-    return {
+    result = {
         "timestamps": [item[0] for item in sorted_timeline],
         "request_counts": [item[1] for item in sorted_timeline]
     }
+    
+    logger.info(f"Returning timeline data: {len(result['timestamps'])} time points")
+    return result
 
 @app.get("/api/export")
 async def export_logs(format: str = "csv"):
@@ -430,9 +495,13 @@ async def export_logs(format: str = "csv"):
     # Convert to list of dicts
     log_dicts = []
     for log in logs:
-        d = log.dict()
-        d['timestamp'] = log.timestamp.isoformat()
-        log_dicts.append(d)
+        try:
+            d = log.dict()
+            if hasattr(log, 'timestamp'):
+                d['timestamp'] = log.timestamp.isoformat()
+            log_dicts.append(d)
+        except:
+            continue
     
     if format.lower() == "csv":
         # Create CSV
@@ -487,16 +556,61 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
+@app.get("/api/debug")
+async def debug_endpoint():
+    """Debug endpoint to check data"""
+    sample_log = None
+    if logs_data["parsed_logs"]:
+        sample_log = logs_data["parsed_logs"][0]
+        sample_log_dict = sample_log.dict() if hasattr(sample_log, 'dict') else str(sample_log)
+    else:
+        sample_log_dict = None
+    
+    sample_alert = None
+    if logs_data["alerts"]:
+        sample_alert = logs_data["alerts"][0]
+        sample_alert_dict = sample_alert.dict() if hasattr(sample_alert, 'dict') else str(sample_alert)
+    else:
+        sample_alert_dict = None
+    
+    return {
+        "parsed_logs_count": len(logs_data["parsed_logs"]),
+        "alerts_count": len(logs_data["alerts"]),
+        "sample_log": sample_log_dict,
+        "sample_alert": sample_alert_dict,
+        "metrics": logs_data.get("metrics", {}),
+        "file_hashes": logs_data.get("file_hashes", {})
+    }
+
 def update_metrics():
     """Update global metrics"""
     if logs_data["parsed_logs"]:
         # Simple metrics calculation
         logs = logs_data["parsed_logs"]
         total_requests = len(logs)
-        unique_ips = len(set(log.client_ip for log in logs))
-        total_bytes = sum(log.bytes_sent for log in logs if log.bytes_sent)
-        status_4xx = sum(1 for log in logs if 400 <= log.status < 500)
-        status_5xx = sum(1 for log in logs if 500 <= log.status < 600)
+        unique_ips = len(set(log.client_ip for log in logs if hasattr(log, 'client_ip')))
+        
+        total_bytes = 0
+        for log in logs:
+            if hasattr(log, 'bytes_sent') and log.bytes_sent:
+                try:
+                    total_bytes += int(log.bytes_sent)
+                except:
+                    pass
+        
+        status_4xx = 0
+        status_5xx = 0
+        for log in logs:
+            if hasattr(log, 'status'):
+                try:
+                    status = int(log.status)
+                    if 400 <= status < 500:
+                        status_4xx += 1
+                    elif 500 <= status < 600:
+                        status_5xx += 1
+                except:
+                    pass
+        
         error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
         
         logs_data["metrics"] = {
@@ -507,6 +621,8 @@ def update_metrics():
             "status_5xx": status_5xx,
             "error_rate": error_rate
         }
+        
+        logger.info(f"Updated metrics: {logs_data['metrics']}")
 
 def get_cutoff_time(time_range: str) -> datetime:
     """Convert time range string to cutoff datetime"""
