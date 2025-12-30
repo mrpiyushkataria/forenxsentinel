@@ -129,23 +129,27 @@ class NGINXParser:
         
         return entries
     
-    def parse_timestamp(self, timestamp_str: str) -> datetime:
-        """Parse various timestamp formats"""
-        formats = [
-            "%d/%b/%Y:%H:%M:%S %z",  # 01/Jan/2024:12:34:56 +0000
-            "%d/%b/%Y:%H:%M:%S",      # 01/Jan/2024:12:34:56
-            "%Y-%m-%dT%H:%M:%S%z",    # 2024-01-01T12:34:56+00:00
-            "%Y-%m-%d %H:%M:%S",      # 2024-01-01 12:34:56
-        ]
-        
-        for fmt in formats:
-            try:
-                return datetime.strptime(timestamp_str, fmt)
-            except ValueError:
-                continue
-        
-        # If all else fails, return current time
-        return datetime.now()
+def parse_timestamp(self, timestamp_str: str) -> datetime:
+    """Parse various timestamp formats"""
+    formats = [
+        "%d/%b/%Y:%H:%M:%S %z",  # 01/Jan/2024:12:34:56 +0000
+        "%d/%b/%Y:%H:%M:%S",      # 01/Jan/2024:12:34:56
+        "%Y-%m-%dT%H:%M:%S%z",    # 2024-01-01T12:34:56+00:00
+        "%Y-%m-%d %H:%M:%S",      # 2024-01-01 12:34:56
+    ]
+    
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(timestamp_str, fmt)
+            # If datetime is naive (no timezone), make it UTC
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            continue
+    
+    # If all else fails, return current time with UTC timezone
+    return datetime.now(timezone.utc)
     
     def read_log_file(self, file_path: str) -> str:
         """Read log file, supporting .gz compression"""
