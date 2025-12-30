@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ForenX-NGINX Sentinel | Advanced NGINX Forensics Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #7c3aed;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --success: #059669;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --gray: #64748b;
+            --border: #e2e8f0;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .dashboard-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+        }
+        
+        .navbar-brand {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 1.5rem;
+        }
+        
+        .sidebar {
+            background: var(--dark);
+            color: white;
+            padding: 2rem 1rem;
+            min-height: 100vh;
+        }
+        
+        .sidebar-item {
+            padding: 0.75rem 1rem;
+            margin: 0.25rem 0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar-item:hover, .sidebar-item.active {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease;
+            border: 1px solid var(--border);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+        
+        .attack-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .log-row {
+            border-left: 4px solid transparent;
+            transition: all 0.2s ease;
+        }
+        
+        .log-row:hover {
+            background: var(--light);
+            border-left-color: var(--primary);
+        }
+        
+        .status-2xx { color: var(--success); }
+        .status-3xx { color: var(--warning); }
+        .status-4xx { color: var(--danger); }
+        .status-5xx { color: #dc2626; }
+        
+        .ip-badge {
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            margin-bottom: 2rem;
+        }
+        
+        .upload-zone {
+            border: 3px dashed var(--border);
+            border-radius: 15px;
+            padding: 3rem;
+            text-align: center;
+            background: var(--light);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-zone:hover {
+            border-color: var(--primary);
+            background: rgba(37, 99, 235, 0.05);
+        }
+        
+        .alert-high { border-left: 4px solid var(--danger); }
+        .alert-medium { border-left: 4px solid var(--warning); }
+        .alert-low { border-left: 4px solid var(--gray); }
+        
+        .real-time-badge {
+            animation: pulse 2s infinite;
+            background: var(--danger);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .timeline-marker {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        
+        .marker-attack { background: var(--danger); }
+        .marker-error { background: var(--warning); }
+        .marker-normal { background: var(--success); }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-shield-alt me-2"></i>
+                ForenX-NGINX Sentinel
+            </a>
+            <div class="d-flex align-items-center">
+                <span class="real-time-badge me-3" id="realtimeStatus">
+                    <i class="fas fa-circle me-1"></i> Real-time: OFF
+                </span>
+                <button class="btn btn-outline-primary me-2" onclick="exportData()">
+                    <i class="fas fa-download me-1"></i> Export
+                </button>
+                <button class="btn btn-primary" onclick="showUploadModal()">
+                    <i class="fas fa-upload me-1"></i> Upload Logs
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-lg-2">
+                <div class="sidebar rounded-3">
+                    <div class="sidebar-item active" onclick="showDashboard()">
+                        <i class="fas fa-tachometer-alt me-2"></i> Dashboard
+                    </div>
+                    <div class="sidebar-item" onclick="showLogsView()">
+                        <i class="fas fa-list me-2"></i> Raw Logs
+                    </div>
+                    <div class="sidebar-item" onclick="showAlertsView()">
+                        <i class="fas fa-exclamation-triangle me-2"></i> Security Alerts
+                    </div>
+                    <div class="sidebar-item" onclick="showAnalyticsView()">
+                        <i class="fas fa-chart-bar me-2"></i> Analytics
+                    </div>
+                    <div class="sidebar-item" onclick="showTimelineView()">
+                        <i class="fas fa-timeline me-2"></i> Timeline
+                    </div>
+                    <div class="sidebar-item" onclick="showRealTimeView()">
+                        <i class="fas fa-bolt me-2"></i> Real-time Monitor
+                    </div>
+                    <hr class="text-white-50 my-3">
+                    <div class="sidebar-item" onclick="showSettings()">
+                        <i class="fas fa-cog me-2"></i> Settings
+                    </div>
+                    <div class="sidebar-item" onclick="showHelp()">
+                        <i class="fas fa-question-circle me-2"></i> Help & Docs
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-lg-10">
+                <div class="dashboard-container p-4">
+                    <!-- Dashboard Header -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h2 class="mb-0" id="viewTitle">Dashboard Overview</h2>
+                            <p class="text-muted" id="viewSubtitle">Real-time forensic analysis of NGINX logs</p>
+                        </div>
+                    </div>
+
+                    <!-- Stats Cards -->
+                    <div class="row g-4 mb-4" id="statsRow">
+                        <!-- Stats will be loaded here -->
+                    </div>
+
+                    <!-- Main Content Area -->
+                    <div id="mainContent">
+                        <!-- Dashboard View (Default) -->
+                        <div id="dashboardView">
+                            <div class="row">
+                                <!-- Left Column -->
+                                <div class="col-lg-8">
+                                    <!-- Timeline Chart -->
+                                    <div class="chart-container">
+                                        <h5>Request Timeline</h5>
+                                        <div class="row">
+                                            <div class="col-auto">
+                                                <select class="form-select form-select-sm" id="timelineRange" onchange="loadTimelineData()">
+                                                    <option value="1h">Last Hour</option>
+                                                    <option value="6h">Last 6 Hours</option>
+                                                    <option value="24h" selected>Last 24 Hours</option>
+                                                    <option value="7d">Last 7 Days</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-auto">
+                                                <select class="form-select form-select-sm" id="timelineInterval" onchange="loadTimelineData()">
+                                                    <option value="minute">Per Minute</option>
+                                                    <option value="hour" selected>Per Hour</option>
+                                                    <option value="day">Per Day</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <canvas id="timelineChart" height="250"></canvas>
+                                    </div>
+
+                                    <!-- Alerts Table -->
+                                    <div class="chart-container">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <h5 class="mb-0">Recent Security Alerts</h5>
+                                            <a href="#" class="text-primary small" onclick="showAlertsView()">View All</a>
+                                        </div>
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Time</th>
+                                                        <th>Type</th>
+                                                        <th>IP Address</th>
+                                                        <th>Endpoint</th>
+                                                        <th>Confidence</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="alertsTable">
+                                                    <!-- Alerts will be loaded here -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Right Column -->
+                                <div class="col-lg-4">
+                                    <!-- Top IPs -->
+                                    <div class="chart-container mb-4">
+                                        <h5>Top IP Addresses</h5>
+                                        <canvas id="topIpsChart" height="200"></canvas>
+                                    </div>
+
+                                    <!-- Status Distribution -->
+                                    <div class="chart-container mb-4">
+                                        <h5>Status Code Distribution</h5>
+                                        <canvas id="statusChart" height="200"></canvas>
+                                    </div>
+
+                                    <!-- Attack Types -->
+                                    <div class="chart-container">
+                                        <h5>Attack Types Detected</h5>
+                                        <div id="attackTypesList">
+                                            <!-- Attack types will be loaded here -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Raw Logs View -->
+                        <div id="logsView" style="display: none;">
+                            <div class="chart-container">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">Raw Logs Explorer</h5>
+                                    <div class="d-flex">
+                                        <input type="text" class="form-control form-control-sm me-2" id="searchLogs" placeholder="Search logs..." onkeyup="searchLogs()">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="filterLogs()">
+                                            <i class="fas fa-filter"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Timestamp</th>
+                                                <th>IP Address</th>
+                                                <th>Method</th>
+                                                <th>Endpoint</th>
+                                                <th>Status</th>
+                                                <th>Bytes</th>
+                                                <th>User Agent</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="logsTable">
+                                            <!-- Logs will be loaded here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <div class="small text-muted" id="logsCount">Showing 0 logs</div>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="changeLogsPage(-1)">
+                                            <i class="fas fa-chevron-left"></i>
+                                        </button>
+                                        <span class="px-3 py-1" id="logsPageInfo">Page 1</span>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="changeLogsPage(1)">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Analytics View -->
+                        <div id="analyticsView" style="display: none;">
+                            <div class="row">
+                                <div class="col-lg-6">
+                                    <div class="chart-container">
+                                        <h5>Top Endpoints</h5>
+                                        <canvas id="endpointsChart" height="300"></canvas>
+                                    </div>
+                                </div>
+                                <div class="col-lg-6">
+                                    <div class="chart-container">
+                                        <h5>User Agents Analysis</h5>
+                                        <canvas id="userAgentsChart" height="300"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chart-container mt-4">
+                                <h5>Request Methods Distribution</h5>
+                                <canvas id="methodsChart" height="200"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Real-time Monitor View -->
+                        <div id="realtimeView" style="display: none;">
+                            <div class="chart-container">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">Real-time Log Monitor</h5>
+                                    <div class="d-flex align-items-center">
+                                        <div class="form-check form-switch me-3">
+                                            <input class="form-check-input" type="checkbox" id="realtimeToggle" onchange="toggleRealtime()">
+                                            <label class="form-check-label" for="realtimeToggle">Live Stream</label>
+                                        </div>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="clearRealtimeLogs()">
+                                            <i class="fas fa-trash"></i> Clear
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Time</th>
+                                                <th>IP</th>
+                                                <th>Method</th>
+                                                <th>Endpoint</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="realtimeTable">
+                                            <!-- Real-time logs will appear here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal fade" id="uploadModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Upload NGINX Logs</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="upload-zone mb-4" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                        <h5>Drop NGINX log files here or click to browse</h5>
+                        <p class="text-muted">Supports .log, .gz files (access.log, error.log)</p>
+                        <input type="file" id="fileInput" multiple accept=".log,.gz,.txt" style="display: none;">
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">Log Type</label>
+                            <select class="form-select" id="logType">
+                                <option value="auto">Auto Detect</option>
+                                <option value="access">Access Log</option>
+                                <option value="error">Error Log</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Time Zone</label>
+                            <select class="form-select" id="timezone">
+                                <option value="UTC">UTC</option>
+                                <option value="EST">EST</option>
+                                <option value="PST">PST</option>
+                                <option value="IST">IST</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4" id="fileList"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="uploadLogs()" id="uploadBtn">
+                        <i class="fas fa-upload me-1"></i> Upload & Analyze
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Modal -->
+    <div class="modal fade" id="filterModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Filter Logs</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">IP Address</label>
+                        <input type="text" class="form-control" id="filterIp" placeholder="e.g., 192.168.1.1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Status Code</label>
+                        <select class="form-select" id="filterStatus">
+                            <option value="">All</option>
+                            <option value="200">200 OK</option>
+                            <option value="404">404 Not Found</option>
+                            <option value="403">403 Forbidden</option>
+                            <option value="500">500 Server Error</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Time Range</label>
+                        <select class="form-select" id="filterTimeRange">
+                            <option value="all">All Time</option>
+                            <option value="1h">Last Hour</option>
+                            <option value="24h">Last 24 Hours</option>
+                            <option value="7d">Last 7 Days</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="dashboard.js"></script>
+</body>
+</html>
