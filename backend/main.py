@@ -23,6 +23,9 @@ from log_parser import NGINXParser
 from detection_engine import DetectionEngine
 from models import LogEntry, AggregatedMetrics, AttackAlert, ErrorLogEntry
 
+import pytz  # Add this import at the top
+from datetime import datetime, timedelta, timezone
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -533,9 +536,10 @@ def update_metrics():
     if logs_data["parsed_logs"]:
         logs_data["metrics"] = calculate_metrics(logs_data["parsed_logs"])
 
+# Update the get_cutoff_time function
 def get_cutoff_time(time_range: str) -> datetime:
     """Convert time range string to cutoff datetime"""
-    now = datetime.now()
+    now = datetime.now(timezone.utc)  # Make it timezone aware
     
     if time_range == "1h":
         return now - timedelta(hours=1)
@@ -550,7 +554,7 @@ def get_cutoff_time(time_range: str) -> datetime:
     elif time_range == "30d":
         return now - timedelta(days=30)
     else:
-        return datetime.min
+        return datetime.min.replace(tzinfo=timezone.utc)  # Make min aware too
 
 # Create uploads directory
 os.makedirs("uploads", exist_ok=True)
