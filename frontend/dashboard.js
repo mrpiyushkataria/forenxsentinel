@@ -1,9 +1,9 @@
 /**
  * ForenX-NGINX Sentinel Dashboard
- * Main JavaScript for the forensic dashboard
+ * Main JavaScript for the forensic dashboard - FIXED VERSION
  */
 
-const API_BASE = '/api';
+const API_BASE = '/api';  // Use relative path
 let currentView = 'dashboard';
 let currentLogsPage = 1;
 let logsTotalPages = 1;
@@ -104,7 +104,7 @@ function showAnalyticsView() {
 
 function showTimelineView() {
     switchView('timeline', 'Timeline Forensics', 'Interactive timeline with attack markers');
-    // To be implemented
+    loadTimelineViewData();
 }
 
 function showRealTimeView() {
@@ -127,7 +127,10 @@ function switchView(viewName, title, subtitle) {
     });
     
     // Show selected view
-    document.getElementById(viewName + 'View').style.display = 'block';
+    const viewElement = document.getElementById(viewName + 'View');
+    if (viewElement) {
+        viewElement.style.display = 'block';
+    }
     
     // Update header
     document.getElementById('viewTitle').textContent = title;
@@ -145,9 +148,15 @@ function switchView(viewName, title, subtitle) {
 // API Functions
 async function loadDashboardData() {
     try {
+        console.log('Loading dashboard data...');
+        
         // Load metrics
         const metricsResponse = await fetch(`${API_BASE}/metrics?time_range=24h`);
+        if (!metricsResponse.ok) {
+            throw new Error(`Metrics API error: ${metricsResponse.status}`);
+        }
         const metrics = await metricsResponse.json();
+        console.log('Metrics loaded:', metrics);
         
         updateStatsCards(metrics);
         
@@ -174,11 +183,16 @@ async function loadDashboardData() {
 
 async function loadTimelineData() {
     try {
-        const range = document.getElementById('timelineRange').value;
-        const interval = document.getElementById('timelineInterval').value;
+        const range = document.getElementById('timelineRange')?.value || '24h';
+        const interval = document.getElementById('timelineInterval')?.value || 'hour';
         
         const response = await fetch(`${API_BASE}/timeline?interval=${interval}&time_range=${range}`);
+        if (!response.ok) {
+            throw new Error(`Timeline API error: ${response.status}`);
+        }
         const data = await response.json();
+        
+        console.log('Timeline data:', data);
         
         if (data.error) {
             console.warn(data.error);
@@ -195,7 +209,12 @@ async function loadTimelineData() {
 async function loadTopIps() {
     try {
         const response = await fetch(`${API_BASE}/top-data?category=ips&limit=10`);
+        if (!response.ok) {
+            throw new Error(`Top IPs API error: ${response.status}`);
+        }
         const data = await response.json();
+        
+        console.log('Top IPs data:', data);
         
         if (data.error) {
             console.warn(data.error);
@@ -212,7 +231,12 @@ async function loadTopIps() {
 async function loadStatusDistribution() {
     try {
         const response = await fetch(`${API_BASE}/top-data?category=status_codes`);
+        if (!response.ok) {
+            throw new Error(`Status API error: ${response.status}`);
+        }
         const data = await response.json();
+        
+        console.log('Status data:', data);
         
         if (data.error) {
             console.warn(data.error);
@@ -229,7 +253,12 @@ async function loadStatusDistribution() {
 async function loadRecentAlerts() {
     try {
         const response = await fetch(`${API_BASE}/alerts?limit=5`);
+        if (!response.ok) {
+            throw new Error(`Alerts API error: ${response.status}`);
+        }
         const data = await response.json();
+        
+        console.log('Alerts data:', data);
         
         updateAlertsTable(data.alerts || []);
         
@@ -239,19 +268,71 @@ async function loadRecentAlerts() {
 }
 
 async function loadAttackTypes() {
-    // This would be calculated from alerts
-    const attackTypesDiv = document.getElementById('attackTypesList');
-    attackTypesDiv.innerHTML = `
-        <div class="alert alert-light">
-            <small>Attack types will be displayed after log analysis</small>
-        </div>
-    `;
+    try {
+        const response = await fetch(`${API_BASE}/alerts?limit=100`);
+        if (!response.ok) {
+            throw new Error(`Attack types API error: ${response.status}`);
+        }
+        const data = await response.json();
+        
+        const attackTypesDiv = document.getElementById('attackTypesList');
+        const alerts = data.alerts || [];
+        
+        if (alerts.length === 0) {
+            attackTypesDiv.innerHTML = `
+                <div class="alert alert-light">
+                    <small>Attack types will be displayed after log analysis</small>
+                </div>
+            `;
+            return;
+        }
+        
+        // Count attack types
+        const attackCounts = {};
+        alerts.forEach(alert => {
+            const type = alert.attack_type;
+            attackCounts[type] = (attackCounts[type] || 0) + 1;
+        });
+        
+        // Display attack types
+        let html = '';
+        for (const [type, count] of Object.entries(attackCounts)) {
+            let badgeClass = 'bg-secondary';
+            if (type.includes('SQL')) badgeClass = 'bg-danger';
+            else if (type.includes('XSS')) badgeClass = 'bg-warning';
+            else if (type.includes('DoS')) badgeClass = 'bg-danger';
+            else if (type.includes('Brute')) badgeClass = 'bg-danger';
+            
+            html += `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="badge ${badgeClass} me-2">${type}</span>
+                    <small class="text-muted">${count} alerts</small>
+                </div>
+            `;
+        }
+        
+        attackTypesDiv.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading attack types:', error);
+        const attackTypesDiv = document.getElementById('attackTypesList');
+        attackTypesDiv.innerHTML = `
+            <div class="alert alert-light">
+                <small>Error loading attack types</small>
+            </div>
+        `;
+    }
 }
 
 async function loadLogs() {
     try {
         const response = await fetch(`${API_BASE}/logs?page=${currentLogsPage}&limit=100`);
+        if (!response.ok) {
+            throw new Error(`Logs API error: ${response.status}`);
+        }
         const data = await response.json();
+        
+        console.log('Logs data received:', data.logs?.length || 0, 'logs');
         
         updateLogsTable(data.logs || []);
         
@@ -269,29 +350,30 @@ async function loadLogs() {
 
 async function loadAnalytics() {
     try {
+        console.log('Loading analytics data...');
+        
         // Load endpoints
         const endpointsResponse = await fetch(`${API_BASE}/top-data?category=endpoints&limit=10`);
-        const endpointsData = await endpointsResponse.json();
-        
-        if (!endpointsData.error) {
-            updateEndpointsChart(endpointsData);
+        if (endpointsResponse.ok) {
+            const endpointsData = await endpointsResponse.json();
+            console.log('Endpoints data:', endpointsData);
+            if (!endpointsData.error) {
+                updateEndpointsChart(endpointsData);
+            }
         }
         
         // Load user agents
         const uaResponse = await fetch(`${API_BASE}/top-data?category=user_agents&limit=8`);
-        const uaData = await uaResponse.json();
-        
-        if (!uaData.error) {
-            updateUserAgentsChart(uaData);
+        if (uaResponse.ok) {
+            const uaData = await uaResponse.json();
+            console.log('User agents data:', uaData);
+            if (!uaData.error) {
+                updateUserAgentsChart(uaData);
+            }
         }
         
-        // Load methods (from metrics)
-        const metricsResponse = await fetch(`${API_BASE}/metrics`);
-        const metrics = await metricsResponse.json();
-        
-        if (metrics.request_methods) {
-            updateMethodsChart(metrics.request_methods);
-        }
+        // Load methods from logs
+        await loadMethodsFromLogs();
         
     } catch (error) {
         console.error('Error loading analytics:', error);
@@ -299,16 +381,60 @@ async function loadAnalytics() {
     }
 }
 
-// UI Update Functions
+async function loadMethodsFromLogs() {
+    try {
+        const response = await fetch(`${API_BASE}/logs?limit=1000`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const logs = data.logs || [];
+        
+        const methodCounts = {};
+        logs.forEach(log => {
+            if (log.method) {
+                methodCounts[log.method] = (methodCounts[log.method] || 0) + 1;
+            }
+        });
+        
+        if (Object.keys(methodCounts).length > 0) {
+            updateMethodsChart(methodCounts);
+        }
+        
+    } catch (error) {
+        console.error('Error loading methods:', error);
+    }
+}
+
+async function loadTimelineViewData() {
+    // To be implemented for timeline view
+    showToast('Timeline view will be implemented in Phase 2', 'info');
+}
+
+// UI Update Functions - FIXED VERSION
 function updateStatsCards(metrics) {
     const statsRow = document.getElementById('statsRow');
+    
+    if (!statsRow) {
+        console.error('Stats row element not found');
+        return;
+    }
+    
+    console.log('Updating stats with:', metrics);
+    
+    // Ensure we have valid numbers
+    const totalRequests = metrics.total_requests || 0;
+    const uniqueIps = metrics.unique_ips || 0;
+    const totalBytes = metrics.total_bytes || 0;
+    const status4xx = metrics.status_4xx || 0;
+    const status5xx = metrics.status_5xx || 0;
+    const errorRate = metrics.error_rate || 0;
     
     statsRow.innerHTML = `
         <div class="col-xl-2 col-lg-4 col-md-6">
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="mb-0">${metrics.total_requests?.toLocaleString() || 0}</h3>
+                        <h3 class="mb-0">${totalRequests.toLocaleString()}</h3>
                         <p class="text-muted mb-0">Total Requests</p>
                     </div>
                     <div class="stat-icon" style="background: #dbeafe; color: #1d4ed8;">
@@ -322,7 +448,7 @@ function updateStatsCards(metrics) {
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="mb-0">${metrics.unique_ips?.toLocaleString() || 0}</h3>
+                        <h3 class="mb-0">${uniqueIps.toLocaleString()}</h3>
                         <p class="text-muted mb-0">Unique IPs</p>
                     </div>
                     <div class="stat-icon" style="background: #fce7f3; color: #be185d;">
@@ -336,7 +462,7 @@ function updateStatsCards(metrics) {
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="mb-0">${formatBytes(metrics.total_bytes || 0)}</h3>
+                        <h3 class="mb-0">${formatBytes(totalBytes)}</h3>
                         <p class="text-muted mb-0">Total Bytes</p>
                     </div>
                     <div class="stat-icon" style="background: #dcfce7; color: #166534;">
@@ -350,7 +476,7 @@ function updateStatsCards(metrics) {
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="mb-0">${metrics.status_4xx || 0}</h3>
+                        <h3 class="mb-0">${status4xx.toLocaleString()}</h3>
                         <p class="text-muted mb-0">4xx Errors</p>
                     </div>
                     <div class="stat-icon" style="background: #fef3c7; color: #92400e;">
@@ -364,7 +490,7 @@ function updateStatsCards(metrics) {
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="mb-0">${metrics.status_5xx || 0}</h3>
+                        <h3 class="mb-0">${status5xx.toLocaleString()}</h3>
                         <p class="text-muted mb-0">5xx Errors</p>
                     </div>
                     <div class="stat-icon" style="background: #fee2e2; color: #991b1b;">
@@ -378,7 +504,7 @@ function updateStatsCards(metrics) {
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h3 class="mb-0">${(metrics.error_rate * 100 || 0).toFixed(1)}%</h3>
+                        <h3 class="mb-0">${(errorRate * 100).toFixed(1)}%</h3>
                         <p class="text-muted mb-0">Error Rate</p>
                     </div>
                     <div class="stat-icon" style="background: #e0e7ff; color: #3730a3;">
@@ -391,19 +517,60 @@ function updateStatsCards(metrics) {
 }
 
 function updateTimelineChart(data) {
-    const ctx = document.getElementById('timelineChart').getContext('2d');
+    const canvas = document.getElementById('timelineChart');
+    if (!canvas) {
+        console.error('Timeline chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
     
     if (timelineChart) {
         timelineChart.destroy();
     }
     
+    // Ensure we have data
+    const timestamps = data.timestamps || [];
+    const requestCounts = data.request_counts || [];
+    
+    if (timestamps.length === 0 || requestCounts.length === 0) {
+        // Create empty chart with message
+        timelineChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    label: 'Requests',
+                    data: [0],
+                    borderColor: '#e2e8f0',
+                    backgroundColor: 'rgba(226, 232, 240, 0.1)',
+                    borderWidth: 1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'No timeline data available'
+                    }
+                }
+            }
+        });
+        return;
+    }
+    
     timelineChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: data.timestamps,
+            labels: timestamps,
             datasets: [{
                 label: 'Requests',
-                data: data.request_counts,
+                data: requestCounts,
                 borderColor: '#2563eb',
                 backgroundColor: 'rgba(37, 99, 235, 0.1)',
                 borderWidth: 2,
@@ -422,6 +589,10 @@ function updateTimelineChart(data) {
                 x: {
                     grid: {
                         display: false
+                    },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45
                     }
                 },
                 y: {
@@ -436,14 +607,50 @@ function updateTimelineChart(data) {
 }
 
 function updateTopIpsChart(data) {
-    const ctx = document.getElementById('topIpsChart').getContext('2d');
+    const canvas = document.getElementById('topIpsChart');
+    if (!canvas) {
+        console.error('Top IPs chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
     
     if (topIpsChart) {
         topIpsChart.destroy();
     }
     
+    const labels = data.labels || [];
+    const values = data.values || [];
+    
+    if (labels.length === 0 || values.length === 0) {
+        // Create empty chart
+        topIpsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    data: [0],
+                    backgroundColor: '#e2e8f0'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'No IP data available'
+                    }
+                }
+            }
+        });
+        return;
+    }
+    
     // Truncate IPs for display
-    const truncatedLabels = data.labels.map(ip => {
+    const truncatedLabels = labels.map(ip => {
         if (ip.length > 15) {
             return ip.substring(0, 12) + '...';
         }
@@ -455,7 +662,7 @@ function updateTopIpsChart(data) {
         data: {
             labels: truncatedLabels,
             datasets: [{
-                data: data.values,
+                data: values,
                 backgroundColor: [
                     '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
                     '#ec4899', '#f43f5e', '#ef4444', '#f97316', '#f59e0b'
@@ -475,7 +682,7 @@ function updateTopIpsChart(data) {
                             return `Requests: ${context.parsed.y}`;
                         },
                         afterLabel: function(context) {
-                            return `IP: ${data.labels[context.dataIndex]}`;
+                            return `IP: ${labels[context.dataIndex]}`;
                         }
                     }
                 }
@@ -495,14 +702,51 @@ function updateTopIpsChart(data) {
 }
 
 function updateStatusChart(data) {
-    const ctx = document.getElementById('statusChart').getContext('2d');
+    const canvas = document.getElementById('statusChart');
+    if (!canvas) {
+        console.error('Status chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
     
     if (statusChart) {
         statusChart.destroy();
     }
     
+    const labels = data.labels || [];
+    const values = data.values || [];
+    
+    if (labels.length === 0 || values.length === 0) {
+        // Create empty chart
+        statusChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    data: [1],
+                    backgroundColor: ['#e2e8f0']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'No status data available'
+                    }
+                },
+                cutout: '70%'
+            }
+        });
+        return;
+    }
+    
     // Color mapping for status codes
-    const statusColors = data.labels.map(status => {
+    const statusColors = labels.map(status => {
         if (status.startsWith('2')) return '#10b981';
         if (status.startsWith('3')) return '#f59e0b';
         if (status.startsWith('4')) return '#ef4444';
@@ -513,9 +757,9 @@ function updateStatusChart(data) {
     statusChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: data.labels,
+            labels: labels,
             datasets: [{
-                data: data.values,
+                data: values,
                 backgroundColor: statusColors,
                 borderWidth: 0
             }]
@@ -534,6 +778,12 @@ function updateStatusChart(data) {
 
 function updateAlertsTable(alerts) {
     const tableBody = document.getElementById('alertsTable');
+    if (!tableBody) {
+        console.error('Alerts table body not found');
+        return;
+    }
+    
+    console.log('Updating alerts table with:', alerts.length, 'alerts');
     
     if (alerts.length === 0) {
         tableBody.innerHTML = `
@@ -550,23 +800,23 @@ function updateAlertsTable(alerts) {
     
     alerts.forEach(alert => {
         const time = new Date(alert.timestamp).toLocaleTimeString();
-        const confidencePercent = Math.round(alert.confidence * 100);
+        const confidencePercent = Math.round((alert.confidence || 0.5) * 100);
         
         // Determine severity color
         let severityClass = 'warning';
-        if (alert.confidence > 0.8) severityClass = 'danger';
-        if (alert.confidence < 0.5) severityClass = 'info';
+        if (confidencePercent > 80) severityClass = 'danger';
+        if (confidencePercent < 50) severityClass = 'info';
         
         html += `
             <tr class="log-row alert-${severityClass}">
                 <td><small>${time}</small></td>
                 <td>
                     <span class="badge bg-${severityClass}">
-                        ${alert.attack_type}
+                        ${alert.attack_type || 'Unknown'}
                     </span>
                 </td>
-                <td><span class="ip-badge">${alert.client_ip}</span></td>
-                <td><small>${truncateText(alert.endpoint, 30)}</small></td>
+                <td><span class="ip-badge">${alert.client_ip || 'Unknown'}</span></td>
+                <td><small>${truncateText(alert.endpoint || '', 30)}</small></td>
                 <td>
                     <div class="d-flex align-items-center">
                         <div class="progress flex-grow-1 me-2" style="height: 6px;">
@@ -585,6 +835,12 @@ function updateAlertsTable(alerts) {
 
 function updateLogsTable(logs) {
     const tableBody = document.getElementById('logsTable');
+    if (!tableBody) {
+        console.error('Logs table body not found');
+        return;
+    }
+    
+    console.log('Updating logs table with:', logs.length, 'logs');
     
     if (logs.length === 0) {
         tableBody.innerHTML = `
@@ -608,10 +864,10 @@ function updateLogsTable(logs) {
         html += `
             <tr class="log-row">
                 <td><small>${time}</small></td>
-                <td><span class="ip-badge">${log.client_ip}</span></td>
-                <td><span class="badge bg-light text-dark">${log.method}</span></td>
-                <td><small>${truncateText(log.endpoint, 40)}</small></td>
-                <td><span class="${statusClass} fw-bold">${log.status}</span></td>
+                <td><span class="ip-badge">${log.client_ip || 'Unknown'}</span></td>
+                <td><span class="badge bg-light text-dark">${log.method || 'GET'}</span></td>
+                <td><small>${truncateText(log.endpoint || '', 40)}</small></td>
+                <td><span class="${statusClass} fw-bold">${log.status || 0}</span></td>
                 <td><small>${bytes}</small></td>
                 <td><small title="${log.user_agent || ''}">${userAgent}</small></td>
             </tr>
@@ -622,14 +878,51 @@ function updateLogsTable(logs) {
 }
 
 function updateEndpointsChart(data) {
-    const ctx = document.getElementById('endpointsChart').getContext('2d');
+    const canvas = document.getElementById('endpointsChart');
+    if (!canvas) {
+        console.error('Endpoints chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
     
     if (endpointsChart) {
         endpointsChart.destroy();
     }
     
+    const labels = data.labels || [];
+    const values = data.values || [];
+    
+    if (labels.length === 0 || values.length === 0) {
+        endpointsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    label: 'Requests',
+                    data: [0],
+                    backgroundColor: '#e2e8f0'
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'No endpoint data available'
+                    }
+                }
+            }
+        });
+        return;
+    }
+    
     // Truncate long endpoint names
-    const truncatedLabels = data.labels.map(endpoint => {
+    const truncatedLabels = labels.map(endpoint => {
         if (endpoint.length > 30) {
             return endpoint.substring(0, 27) + '...';
         }
@@ -642,7 +935,7 @@ function updateEndpointsChart(data) {
             labels: truncatedLabels,
             datasets: [{
                 label: 'Requests',
-                data: data.values,
+                data: values,
                 backgroundColor: '#3b82f6'
             }]
         },
@@ -656,7 +949,7 @@ function updateEndpointsChart(data) {
                 tooltip: {
                     callbacks: {
                         title: function(context) {
-                            return data.labels[context[0].dataIndex];
+                            return labels[context[0].dataIndex];
                         }
                     }
                 }
@@ -671,18 +964,53 @@ function updateEndpointsChart(data) {
 }
 
 function updateUserAgentsChart(data) {
-    const ctx = document.getElementById('userAgentsChart').getContext('2d');
+    const canvas = document.getElementById('userAgentsChart');
+    if (!canvas) {
+        console.error('User agents chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
     
     if (userAgentsChart) {
         userAgentsChart.destroy();
     }
     
+    const labels = data.labels || [];
+    const values = data.values || [];
+    
+    if (labels.length === 0 || values.length === 0) {
+        userAgentsChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    data: [1],
+                    backgroundColor: ['#e2e8f0']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'No user agent data available'
+                    }
+                }
+            }
+        });
+        return;
+    }
+    
     userAgentsChart = new Chart(ctx, {
         type: 'pie',
         data: {
-            labels: data.labels,
+            labels: labels,
             datasets: [{
-                data: data.values,
+                data: values,
                 backgroundColor: [
                     '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
                     '#ec4899', '#f43f5e', '#ef4444', '#f97316'
@@ -700,15 +1028,48 @@ function updateUserAgentsChart(data) {
     });
 }
 
-function updateMethodsChart(methods) {
-    const ctx = document.getElementById('methodsChart').getContext('2d');
+function updateMethodsChart(methodCounts) {
+    const canvas = document.getElementById('methodsChart');
+    if (!canvas) {
+        console.error('Methods chart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
     
     if (methodsChart) {
         methodsChart.destroy();
     }
     
-    const labels = Object.keys(methods);
-    const values = Object.values(methods);
+    const labels = Object.keys(methodCounts);
+    const values = Object.values(methodCounts);
+    
+    if (labels.length === 0) {
+        methodsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    label: 'Requests',
+                    data: [0],
+                    backgroundColor: '#e2e8f0'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'No method data available'
+                    }
+                }
+            }
+        });
+        return;
+    }
     
     // Color mapping for HTTP methods
     const methodColors = {
@@ -782,7 +1143,7 @@ function showToast(message, type = 'info') {
     `;
     
     // Add to container
-    const container = document.querySelector('.toast-container');
+    let container = document.querySelector('.toast-container');
     if (!container) {
         const newContainer = document.createElement('div');
         newContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
@@ -826,7 +1187,6 @@ async function uploadLogs() {
         
         console.log('Uploading files:', Array.from(fileInput.files).map(f => f.name));
         
-        // FIXED: Use correct API endpoint
         const response = await fetch(`${API_BASE}/upload-logs`, {
             method: 'POST',
             body: formData
@@ -856,13 +1216,21 @@ async function uploadLogs() {
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
-        modal.hide();
+        if (modal) {
+            modal.hide();
+        }
         
         // Wait a moment for backend to process, then reload dashboard
         setTimeout(() => {
             loadDashboardData();
             if (currentView === 'logs') {
                 loadLogs();
+            }
+            if (currentView === 'analytics') {
+                loadAnalytics();
+            }
+            if (currentView === 'alerts') {
+                loadAlerts();
             }
         }, 1000);
         
@@ -924,12 +1292,17 @@ function applyFilters() {
     
     // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('filterModal'));
-    modal.hide();
+    if (modal) {
+        modal.hide();
+    }
 }
 
 async function loadFilteredLogs(query) {
     try {
         const response = await fetch(`${API_BASE}/logs?${query}`);
+        if (!response.ok) {
+            throw new Error(`Filter API error: ${response.status}`);
+        }
         const data = await response.json();
         
         updateLogsTable(data.logs || []);
@@ -1013,7 +1386,11 @@ function connectWebSocket() {
         return;
     }
     
-    websocket = new WebSocket(`ws://${window.location.host}/ws/logs`);
+    // Fix WebSocket URL
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/logs`;
+    
+    websocket = new WebSocket(wsUrl);
     
     websocket.onopen = () => {
         console.log('WebSocket connected');
@@ -1057,6 +1434,7 @@ function disconnectWebSocket() {
 
 function addRealtimeLog(logData) {
     const tableBody = document.getElementById('realtimeTable');
+    if (!tableBody) return;
     
     // Insert at beginning
     const time = new Date().toLocaleTimeString();
@@ -1065,10 +1443,10 @@ function addRealtimeLog(logData) {
     row.className = 'log-row';
     row.innerHTML = `
         <td><small>${time}</small></td>
-        <td><span class="ip-badge">${logData.client_ip}</span></td>
-        <td><span class="badge bg-light text-dark">${logData.method}</span></td>
-        <td><small>${truncateText(logData.endpoint, 40)}</small></td>
-        <td><span class="status-${Math.floor(logData.status/100)}xx fw-bold">${logData.status}</span></td>
+        <td><span class="ip-badge">${logData.client_ip || 'Unknown'}</span></td>
+        <td><span class="badge bg-light text-dark">${logData.method || 'GET'}</span></td>
+        <td><small>${truncateText(logData.endpoint || '', 40)}</small></td>
+        <td><span class="status-${Math.floor((logData.status || 200)/100)}xx fw-bold">${logData.status || 200}</span></td>
     `;
     
     tableBody.insertBefore(row, tableBody.firstChild);
@@ -1080,7 +1458,10 @@ function addRealtimeLog(logData) {
 }
 
 function clearRealtimeLogs() {
-    document.getElementById('realtimeTable').innerHTML = '';
+    const tableBody = document.getElementById('realtimeTable');
+    if (tableBody) {
+        tableBody.innerHTML = '';
+    }
 }
 
 // Modal Functions
@@ -1098,8 +1479,9 @@ function initializeCharts() {
     const charts = ['timelineChart', 'topIpsChart', 'statusChart', 'endpointsChart', 'userAgentsChart', 'methodsChart'];
     
     charts.forEach(chartId => {
-        const ctx = document.getElementById(chartId)?.getContext('2d');
-        if (ctx) {
+        const canvas = document.getElementById(chartId);
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
             new Chart(ctx, {
                 type: chartId.includes('timeline') ? 'line' : 'bar',
                 data: {
