@@ -181,7 +181,7 @@ async def upload_logs(
 
 @app.get("/api/metrics")
 async def get_metrics(time_range: str = "24h"):
-    """Get aggregated metrics for dashboard"""
+    """Get aggregated metrics for dashboard - FIXED"""
     if not logs_data["parsed_logs"]:
         return {
             "total_requests": 0,
@@ -198,7 +198,7 @@ async def get_metrics(time_range: str = "24h"):
     
     filtered_logs = [
         log for log in logs_data["parsed_logs"] 
-        if log.timestamp >= cutoff
+        if hasattr(log, 'timestamp') and log.timestamp >= cutoff
     ]
     
     if not filtered_logs:
@@ -214,10 +214,23 @@ async def get_metrics(time_range: str = "24h"):
     # Calculate metrics
     total_requests = len(filtered_logs)
     unique_ips = len(set(log.client_ip for log in filtered_logs))
-    total_bytes = sum(log.bytes_sent for log in filtered_logs if log.bytes_sent)
     
-    status_4xx = sum(1 for log in filtered_logs if 400 <= log.status < 500)
-    status_5xx = sum(1 for log in filtered_logs if 500 <= log.status < 600)
+    # Calculate bytes safely
+    total_bytes = 0
+    for log in filtered_logs:
+        if hasattr(log, 'bytes_sent') and log.bytes_sent:
+            total_bytes += log.bytes_sent
+    
+    # Calculate status codes safely
+    status_4xx = 0
+    status_5xx = 0
+    for log in filtered_logs:
+        if hasattr(log, 'status'):
+            status = log.status
+            if 400 <= status < 500:
+                status_4xx += 1
+            elif 500 <= status < 600:
+                status_5xx += 1
     
     error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
     
