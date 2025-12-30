@@ -802,7 +802,6 @@ function showToast(message, type = 'info') {
     });
 }
 
-// Upload Functions
 async function uploadLogs() {
     const fileInput = document.getElementById('fileInput');
     const logType = document.getElementById('logType').value;
@@ -820,18 +819,34 @@ async function uploadLogs() {
     try {
         const formData = new FormData();
         
-        for (let file of fileInput.files) {
-            formData.append('files', file);
+        // Add each file
+        for (let i = 0; i < fileInput.files.length; i++) {
+            formData.append('files', fileInput.files[i]);
         }
         formData.append('log_type', logType);
-        formData.append('timezone', timezone);
         
-        const response = await fetch(`${API_BASE}/upload-logs`, {
+        console.log('Uploading files:', Array.from(fileInput.files).map(f => f.name));
+        
+        // Change the URL to point to backend
+        const response = await fetch('http://localhost:8000/api/upload-logs', {
             method: 'POST',
             body: formData
         });
         
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        
+        console.log('Upload result:', result);
+        
+        if (result.files_processed && result.files_processed.length > 0) {
+            const failedFiles = result.files_processed.filter(f => f.error);
+            if (failedFiles.length > 0) {
+                showToast(`Some files failed: ${failedFiles.map(f => f.filename).join(', ')}`, 'warning');
+            }
+        }
         
         showToast(`Uploaded ${result.total_records} log entries, found ${result.alerts_found} alerts`, 'success');
         
@@ -848,7 +863,7 @@ async function uploadLogs() {
         
     } catch (error) {
         console.error('Upload error:', error);
-        showToast('Error uploading files', 'danger');
+        showToast(`Error uploading files: ${error.message}`, 'danger');
     } finally {
         uploadBtn.disabled = false;
         uploadBtn.innerHTML = '<i class="fas fa-upload me-1"></i> Upload & Analyze';
