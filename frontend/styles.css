@@ -1,0 +1,183 @@
+/* Additional styles for ForenX-NGINX Sentinel */
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* Log severity colors */
+.severity-critical {
+    background: linear-gradient(135deg, #fecaca, #fca5a5);
+    border-left: 4px solid #dc2626;
+}
+
+.severity-high {
+    background: linear-gradient(135deg, #fed7aa, #fdba74);
+    border-left: 4px solid #f97316;
+}
+
+.severity-medium {
+    background: linear-gradient(135deg, #fde68a, #fbbf24);
+    border-left: 4px solid #f59e0b;
+}
+
+.severity-low {
+    background: linear-gradient(135deg, #dbeafe, #93c5fd);
+    border-left: 4px solid #3b82f6;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Status code colors */
+.status-code {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    text-align: center;
+    line-height: 24px;
+    font-weight: bold;
+    font-size: 0.75rem;
+}
+
+.status-2xx { background-color: #10b981; color: white; }
+.status-3xx { background-color: #f59e0b; color: white; }
+.status-4xx { background-color: #ef4444; color: white; }
+.status-5xx { background-color: #dc2626; color: white; }
+
+/* Tooltip styling */
+.custom-tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+}
+
+.custom-tooltip .tooltip-text {
+    visibility: hidden;
+    width: 300px;
+    background-color: #1e293b;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 1000;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 0.875rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.custom-tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Loading spinner */
+.spinner-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #e2e8f0;
+    border-top: 5px solid #2563eb;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sidebar {
+        min-height: auto;
+        padding: 1rem;
+    }
+    
+    .stat-card {
+        margin-bottom: 1rem;
+    }
+    
+    .chart-container {
+        padding: 1rem;
+    }
+}
+
+/* Print styles */
+@media print {
+    .sidebar, .navbar, .modal, button, .btn {
+        display: none !important;
+    }
+    
+    .dashboard-container {
+        box-shadow: none !important;
+        background: white !important;
+    }
+    
+    .chart-container {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    body {
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+    }
+    
+    .dashboard-container {
+        background: #1e293b;
+        color: #e2e8f0;
+    }
+    
+    .stat-card, .chart-container {
+        background: #334155;
+        border-color: #475569;
+        color: #e2e8f0;
+    }
+    
+    .text-muted {
+        color: #94a3b8 !important;
+    }
+}
