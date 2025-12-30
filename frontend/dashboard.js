@@ -805,7 +805,6 @@ function showToast(message, type = 'info') {
 async function uploadLogs() {
     const fileInput = document.getElementById('fileInput');
     const logType = document.getElementById('logType').value;
-    const timezone = document.getElementById('timezone').value;
     
     if (fileInput.files.length === 0) {
         showToast('Please select log files to upload', 'warning');
@@ -827,35 +826,45 @@ async function uploadLogs() {
         
         console.log('Uploading files:', Array.from(fileInput.files).map(f => f.name));
         
-        // Change the URL to point to backend
-        const response = await fetch('http://localhost:8000/api/upload-logs', {
+        // FIXED: Use correct API endpoint
+        const response = await fetch(`${API_BASE}/upload-logs`, {
             method: 'POST',
             body: formData
         });
         
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errorText = await response.text();
+            throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`);
         }
         
         const result = await response.json();
         
         console.log('Upload result:', result);
         
-        if (result.files_processed && result.files_processed.length > 0) {
+        if (result.files_processed) {
             const failedFiles = result.files_processed.filter(f => f.error);
+            const successFiles = result.files_processed.filter(f => !f.error);
+            
             if (failedFiles.length > 0) {
-                showToast(`Some files failed: ${failedFiles.map(f => f.filename).join(', ')}`, 'warning');
+                showToast(`${failedFiles.length} file(s) failed to process`, 'warning');
+            }
+            
+            if (successFiles.length > 0) {
+                showToast(`Successfully processed ${successFiles.length} file(s) with ${result.total_records} log entries`, 'success');
             }
         }
-        
-        showToast(`Uploaded ${result.total_records} log entries, found ${result.alerts_found} alerts`, 'success');
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
         modal.hide();
         
-        // Reload dashboard data
-        loadDashboardData();
+        // Wait a moment for backend to process, then reload dashboard
+        setTimeout(() => {
+            loadDashboardData();
+            if (currentView === 'logs') {
+                loadLogs();
+            }
+        }, 1000);
         
         // Reset file input
         fileInput.value = '';
