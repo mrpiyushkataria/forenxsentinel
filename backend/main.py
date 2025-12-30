@@ -433,17 +433,43 @@ async def get_timeline(
     interval: str = "hour",
     time_range: str = "24h"
 ):
-    """Get timeline data for charts - FIXED (NO TIME FILTERING)"""
+    """Get timeline data for charts - WITH TIME FILTERING"""
     logger.info(f"Getting timeline data, interval: {interval}, time_range: {time_range}")
     
     if not logs_data["parsed_logs"]:
         logger.info("No parsed logs found, returning empty")
         return {"timestamps": [], "request_counts": []}
     
-    # DON'T filter by time - use all logs
-    filtered_logs = logs_data["parsed_logs"]
+    # Calculate time window based on time_range
+    now = datetime.now(timezone.utc)
+    start_time = None
     
-    logger.info(f"Using ALL logs for timeline: {len(filtered_logs)}")
+    if time_range == "1h":
+        start_time = now - timedelta(hours=1)
+    elif time_range == "6h":
+        start_time = now - timedelta(hours=6)
+    elif time_range == "24h":
+        start_time = now - timedelta(hours=24)
+    elif time_range == "7d":
+        start_time = now - timedelta(days=7)
+    elif time_range == "30d":
+        start_time = now - timedelta(days=30)
+    else:
+        # Default to all logs
+        start_time = None
+    
+    # Filter logs by time if start_time is specified
+    if start_time:
+        filtered_logs = []
+        for log in logs_data["parsed_logs"]:
+            if hasattr(log, 'timestamp'):
+                # Check if log timestamp is within range
+                if log.timestamp >= start_time:
+                    filtered_logs.append(log)
+    else:
+        filtered_logs = logs_data["parsed_logs"]
+    
+    logger.info(f"Filtered logs for timeline: {len(filtered_logs)} out of {len(logs_data['parsed_logs'])}")
     
     if not filtered_logs:
         return {"timestamps": [], "request_counts": []}
@@ -459,6 +485,12 @@ async def get_timeline(
                 key = log.timestamp.strftime("%Y-%m-%d %H:00")
             elif interval == "day":
                 key = log.timestamp.strftime("%Y-%m-%d")
+            elif interval == "week":
+                # Get week number
+                week_num = log.timestamp.isocalendar()[1]
+                key = f"{log.timestamp.year}-W{week_num:02d}"
+            elif interval == "month":
+                key = log.timestamp.strftime("%Y-%m")
             else:
                 key = log.timestamp.strftime("%Y-%m-%d %H:%M")
             
@@ -474,6 +506,227 @@ async def get_timeline(
     
     logger.info(f"Returning timeline data: {len(result['timestamps'])} time points")
     return result
+
+
+@app.get("/api/historical/metrics")
+async def get_historical_metrics():
+    """Get metrics aggregated by time periods"""
+    if not logs_data["parsed_logs"]:
+        return {"daily": [], "weekly": [], "monthly": []}
+    
+    logs = logs_data["parsed_logs"]
+    
+    # Aggregate by day
+    daily_data = {}
+    for log in logs:
+        if hasattr(log, 'timestamp'):
+            day_key = log.timestamp.strftime("%Y-%m-%d")
+            if day_key not in daily_data:
+                daily_data[day_key] = {
+                    "date": day_key,
+                    "requests": 0,
+                    "errors": 0,
+                    "unique_ips": set(),
+                    "bytes": 0
+                }
+            
+            daily = daily_data[day_key]
+            daily["requests"] += 1
+            
+            if hasattr(log, 'bytes_sent') and log.bytes_sent:
+                try:
+                    daily["bytes"] += int(log.bytes_sent)
+                except:
+                    pass
+            
+            if hasattr(log, 'client_ip') and log.client_ip:
+                daily["unique_ips"].add(log.client_ip)
+            
+            if hasattr(log, 'status'):
+                try:
+                    status = int(log.status)
+                    if 400 <= status < 600:
+                        daily["errors"] += 1
+                except:
+                    pass
+    
+    # Convert sets to counts
+    daily_result = []
+    for day_key, data in sorted(daily_data.items()):
+        daily_result.append({
+            "date": data["date"],
+            "requests": data["requests"],
+            "errors": data["errors"],
+            "unique_ips": len(data["unique_ips"]),
+            "bytes": data["bytes"],
+            "error_rate": data["errors"] / data["requests"] if data["requests"] > 0 else 0
+        })
+    
+    return {
+        "daily": daily_result[-30:],  # Last 30 days
+        "weekly": aggregate_by_week(daily_result),
+        "monthly": aggregate_by_month(daily_result)
+    }
+
+def aggregate_by_week(daily_data):
+    """Aggregate daily data by week"""
+    weekly_data = {}
+    for day in daily_data:
+        date_obj = datetime.strptime(day["date"], "%Y-%m-%d")
+        year, week, _ = date_obj.isocalendar()
+        week_key = f"{year}-W{week:02d}"
+        
+        if week_key not in weekly_data:
+            weekly_data[week_key] = {
+                "week": week_key,
+                "requests": 0,
+                "errors": 0,
+                "unique_ips": 0,
+                "bytes": 0
+            }
+        
+        weekly = weekly_data[week_key]
+        weekly["requests"] += day["requests"]
+        weekly["errors"] += day["errors"]
+        weekly["unique_ips"] += day["unique_ips"]
+        weekly["bytes"] += day["bytes"]
+    
+    result = []
+    for week_key, data in sorted(weekly_data.items()):
+        result.append({
+            "week": data["week"],
+            "requests": data["requests"],
+            "errors": data["errors"],
+            "unique_ips": data["unique_ips"],
+            "bytes": data["bytes"],
+            "error_rate": data["errors"] / data["requests"] if data["requests"] > 0 else 0
+        })
+    
+    return result
+
+def aggregate_by_month(daily_data):
+    """Aggregate daily data by month"""
+    monthly_data = {}
+    for day in daily_data:
+        date_obj = datetime.strptime(day["date"], "%Y-%m-%d")
+        month_key = date_obj.strftime("%Y-%m")
+        
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {
+                "month": month_key,
+                "requests": 0,
+                "errors": 0,
+                "unique_ips": 0,
+                "bytes": 0
+            }
+        
+        monthly = monthly_data[month_key]
+        monthly["requests"] += day["requests"]
+        monthly["errors"] += day["errors"]
+        monthly["unique_ips"] += day["unique_ips"]
+        monthly["bytes"] += day["bytes"]
+    
+    result = []
+    for month_key, data in sorted(monthly_data.items()):
+        result.append({
+            "month": data["month"],
+            "requests": data["requests"],
+            "errors": data["errors"],
+            "unique_ips": data["unique_ips"],
+            "bytes": data["bytes"],
+            "error_rate": data["errors"] / data["requests"] if data["requests"] > 0 else 0
+        })
+    
+    return result
+
+@app.get("/api/compare/periods")
+async def compare_periods():
+    """Compare current period with previous period"""
+    if not logs_data["parsed_logs"]:
+        return {
+            "current": {},
+            "previous": {},
+            "changes": {}
+        }
+    
+    now = datetime.now(timezone.utc)
+    
+    # Current period (last 24 hours)
+    current_start = now - timedelta(hours=24)
+    # Previous period (24-48 hours ago)
+    previous_start = now - timedelta(hours=48)
+    previous_end = now - timedelta(hours=24)
+    
+    current_logs = []
+    previous_logs = []
+    
+    for log in logs_data["parsed_logs"]:
+        if hasattr(log, 'timestamp'):
+            if log.timestamp >= current_start:
+                current_logs.append(log)
+            elif previous_end <= log.timestamp < previous_start:
+                previous_logs.append(log)
+    
+    def calculate_period_metrics(logs):
+        if not logs:
+            return {
+                "requests": 0,
+                "unique_ips": 0,
+                "bytes": 0,
+                "errors": 0,
+                "error_rate": 0
+            }
+        
+        total_requests = len(logs)
+        unique_ips = len(set([log.client_ip for log in logs if hasattr(log, 'client_ip')]))
+        
+        total_bytes = 0
+        for log in logs:
+            if hasattr(log, 'bytes_sent') and log.bytes_sent:
+                try:
+                    total_bytes += int(log.bytes_sent)
+                except:
+                    pass
+        
+        errors = 0
+        for log in logs:
+            if hasattr(log, 'status'):
+                try:
+                    status = int(log.status)
+                    if 400 <= status < 600:
+                        errors += 1
+                except:
+                    pass
+        
+        error_rate = errors / total_requests if total_requests > 0 else 0
+        
+        return {
+            "requests": total_requests,
+            "unique_ips": unique_ips,
+            "bytes": total_bytes,
+            "errors": errors,
+            "error_rate": error_rate
+        }
+    
+    current_metrics = calculate_period_metrics(current_logs)
+    previous_metrics = calculate_period_metrics(previous_logs)
+    
+    # Calculate changes
+    changes = {}
+    for key in current_metrics:
+        if key in previous_metrics and previous_metrics[key] > 0:
+            if key == "error_rate":
+                changes[key] = current_metrics[key] - previous_metrics[key]
+            else:
+                changes[key] = ((current_metrics[key] - previous_metrics[key]) / previous_metrics[key]) * 100
+        else:
+            changes[key] = 0
+    
+    return {
+        "current": current_metrics,
+        "previous": previous_metrics,
+        "changes": changes
+    }
 
 @app.get("/api/export")
 async def export_logs(format: str = "csv"):
