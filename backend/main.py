@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ForenX-NGINX Sentinel - Advanced NGINX Forensic Dashboard
-Backend Server with FastAPI - COMPLETE FIXED VERSION
+Backend Server with FastAPI - FINAL WORKING VERSION
 """
 import os
 import json
@@ -183,7 +183,7 @@ async def upload_logs(
 
 @app.get("/api/metrics")
 async def get_metrics(time_range: str = "24h"):
-    """Get aggregated metrics for dashboard - FIXED"""
+    """Get aggregated metrics for dashboard - FIXED (NO TIME FILTERING)"""
     logger.info(f"Getting metrics for time_range: {time_range}")
     
     if not logs_data["parsed_logs"]:
@@ -199,16 +199,10 @@ async def get_metrics(time_range: str = "24h"):
     
     logger.info(f"Total logs in memory: {len(logs_data['parsed_logs'])}")
     
-    # Filter by time range
-    now = datetime.now(timezone.utc)
-    cutoff = get_cutoff_time(time_range)
+    # DON'T filter by time - show all logs regardless of timestamp
+    filtered_logs = logs_data["parsed_logs"]
     
-    filtered_logs = [
-        log for log in logs_data["parsed_logs"] 
-        if hasattr(log, 'timestamp') and log.timestamp >= cutoff
-    ]
-    
-    logger.info(f"Filtered logs after time filter: {len(filtered_logs)}")
+    logger.info(f"Using ALL logs (no time filter): {len(filtered_logs)}")
     
     if not filtered_logs:
         return {
@@ -222,7 +216,13 @@ async def get_metrics(time_range: str = "24h"):
     
     # Calculate metrics
     total_requests = len(filtered_logs)
-    unique_ips = len(set(log.client_ip for log in filtered_logs if hasattr(log, 'client_ip')))
+    
+    # Get unique IPs
+    unique_ips = set()
+    for log in filtered_logs:
+        if hasattr(log, 'client_ip') and log.client_ip:
+            unique_ips.add(log.client_ip)
+    unique_ips_count = len(unique_ips)
     
     # Calculate bytes safely
     total_bytes = 0
@@ -251,7 +251,7 @@ async def get_metrics(time_range: str = "24h"):
     
     metrics = {
         "total_requests": total_requests,
-        "unique_ips": unique_ips,
+        "unique_ips": unique_ips_count,
         "total_bytes": total_bytes,
         "status_4xx": status_4xx,
         "status_5xx": status_5xx,
@@ -309,9 +309,6 @@ async def get_logs(
     for log in paginated_logs:
         try:
             log_dict = log.dict()
-            # Ensure timestamp is serializable
-            if hasattr(log, 'timestamp'):
-                log_dict['timestamp'] = log.timestamp.isoformat()
             log_dicts.append(log_dict)
         except Exception as e:
             logger.error(f"Error serializing log: {e}")
@@ -338,7 +335,7 @@ async def get_alerts(limit: int = 50):
     logger.info(f"Getting alerts, limit {limit}, total alerts: {len(alerts)}")
     
     # Sort by timestamp (newest first)
-    alerts.sort(key=lambda x: x.timestamp if hasattr(x, 'timestamp') else datetime.now(timezone.utc), reverse=True)
+    alerts.sort(key=lambda x: x.timestamp if hasattr(x, 'timestamp') else datetime.min, reverse=True)
     alerts = alerts[:limit]
     
     # Convert to dict with proper serialization
@@ -346,8 +343,6 @@ async def get_alerts(limit: int = 50):
     for alert in alerts:
         try:
             alert_dict = alert.dict()
-            alert_dict["timestamp"] = alert.timestamp.isoformat() if hasattr(alert, 'timestamp') else datetime.now(timezone.utc).isoformat()
-            alert_dict["attack_type"] = alert.attack_type.value if hasattr(alert, 'attack_type') else "Unknown"
             alert_dicts.append(alert_dict)
         except Exception as e:
             logger.error(f"Error serializing alert: {e}")
@@ -438,21 +433,17 @@ async def get_timeline(
     interval: str = "hour",
     time_range: str = "24h"
 ):
-    """Get timeline data for charts"""
+    """Get timeline data for charts - FIXED (NO TIME FILTERING)"""
     logger.info(f"Getting timeline data, interval: {interval}, time_range: {time_range}")
     
     if not logs_data["parsed_logs"]:
         logger.info("No parsed logs found, returning empty")
         return {"timestamps": [], "request_counts": []}
     
-    # Filter by time
-    cutoff = get_cutoff_time(time_range)
-    filtered_logs = [
-        log for log in logs_data["parsed_logs"] 
-        if hasattr(log, 'timestamp') and log.timestamp >= cutoff
-    ]
+    # DON'T filter by time - use all logs
+    filtered_logs = logs_data["parsed_logs"]
     
-    logger.info(f"Filtered logs for timeline: {len(filtered_logs)}")
+    logger.info(f"Using ALL logs for timeline: {len(filtered_logs)}")
     
     if not filtered_logs:
         return {"timestamps": [], "request_counts": []}
@@ -497,8 +488,6 @@ async def export_logs(format: str = "csv"):
     for log in logs:
         try:
             d = log.dict()
-            if hasattr(log, 'timestamp'):
-                d['timestamp'] = log.timestamp.isoformat()
             log_dicts.append(d)
         except:
             continue
@@ -588,7 +577,13 @@ def update_metrics():
         # Simple metrics calculation
         logs = logs_data["parsed_logs"]
         total_requests = len(logs)
-        unique_ips = len(set(log.client_ip for log in logs if hasattr(log, 'client_ip')))
+        
+        # Get unique IPs
+        unique_ips = set()
+        for log in logs:
+            if hasattr(log, 'client_ip') and log.client_ip:
+                unique_ips.add(log.client_ip)
+        unique_ips_count = len(unique_ips)
         
         total_bytes = 0
         for log in logs:
@@ -615,7 +610,7 @@ def update_metrics():
         
         logs_data["metrics"] = {
             "total_requests": total_requests,
-            "unique_ips": unique_ips,
+            "unique_ips": unique_ips_count,
             "total_bytes": total_bytes,
             "status_4xx": status_4xx,
             "status_5xx": status_5xx,
@@ -623,25 +618,6 @@ def update_metrics():
         }
         
         logger.info(f"Updated metrics: {logs_data['metrics']}")
-
-def get_cutoff_time(time_range: str) -> datetime:
-    """Convert time range string to cutoff datetime"""
-    now = datetime.now(timezone.utc)
-    
-    if time_range == "1h":
-        return now - timedelta(hours=1)
-    elif time_range == "6h":
-        return now - timedelta(hours=6)
-    elif time_range == "12h":
-        return now - timedelta(hours=12)
-    elif time_range == "24h":
-        return now - timedelta(hours=24)
-    elif time_range == "7d":
-        return now - timedelta(days=7)
-    elif time_range == "30d":
-        return now - timedelta(days=30)
-    else:
-        return datetime.min.replace(tzinfo=timezone.utc)
 
 # Create uploads directory
 os.makedirs("uploads", exist_ok=True)
