@@ -1,5 +1,5 @@
 """
-Data models for NGINX Forensics
+Data models for NGINX Forensics - COMPLETE FIXED VERSION
 """
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -26,6 +26,14 @@ class LogEntry(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+    
+    def dict(self, **kwargs):
+        """Override dict method to ensure datetime serialization - ADD THIS METHOD"""
+        d = super().dict(**kwargs)
+        # Ensure timestamp is properly serialized
+        if 'timestamp' in d and isinstance(d['timestamp'], datetime):
+            d['timestamp'] = d['timestamp'].isoformat()
+        return d
 
 class ErrorLogEntry(BaseModel):
     """Parsed NGINX error log entry"""
@@ -45,6 +53,13 @@ class ErrorLogEntry(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+    
+    def dict(self, **kwargs):
+        """Override dict method to ensure datetime serialization - ADD THIS METHOD"""
+        d = super().dict(**kwargs)
+        if 'timestamp' in d and isinstance(d['timestamp'], datetime):
+            d['timestamp'] = d['timestamp'].isoformat()
+        return d
 
 class AttackType(str, Enum):
     """Types of attacks to detect"""
@@ -74,6 +89,15 @@ class AttackAlert(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+    
+    def dict(self, **kwargs):
+        """Override dict method to ensure datetime serialization - ADD THIS METHOD"""
+        d = super().dict(**kwargs)
+        if 'timestamp' in d and isinstance(d['timestamp'], datetime):
+            d['timestamp'] = d['timestamp'].isoformat()
+        if 'attack_type' in d and isinstance(d['attack_type'], AttackType):
+            d['attack_type'] = d['attack_type'].value
+        return d
 
 class AggregatedMetrics(BaseModel):
     """Aggregated metrics for dashboard"""
@@ -95,6 +119,15 @@ class AggregatedMetrics(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+    
+    def dict(self, **kwargs):
+        """Override dict method to ensure datetime serialization - ADD THIS METHOD"""
+        d = super().dict(**kwargs)
+        if 'timeframe_min' in d and isinstance(d['timeframe_min'], datetime):
+            d['timeframe_min'] = d['timeframe_min'].isoformat()
+        if 'timeframe_max' in d and isinstance(d['timeframe_max'], datetime):
+            d['timeframe_max'] = d['timeframe_max'].isoformat()
+        return d
 
 class ExportRequest(BaseModel):
     """Request model for log export"""
