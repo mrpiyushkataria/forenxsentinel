@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ForenX-NGINX Sentinel - Advanced NGINX Forensic Dashboard
-Backend Server with FastAPI
+Backend Server with FastAPI - FIXED VERSION
 """
 import os
 import json
@@ -10,21 +10,17 @@ import hashlib
 import asyncio
 import uvicorn
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
 from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 import logging
 
 # Import custom modules
 from log_parser import NGINXParser
 from detection_engine import DetectionEngine
-from models import LogEntry, AggregatedMetrics, AttackAlert, ErrorLogEntry
-
-import pytz  # Add this import at the top
-from datetime import datetime, timedelta, timezone
+from models import LogEntry, AggregatedMetrics, AttackAlert, ErrorLogEntry, AttackType
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +35,7 @@ app = FastAPI(
 # CORS middleware - allow frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "*"],
+    allow_origins=["*"],  # Allow all for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -88,14 +84,16 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
+# FIXED: Changed from POST to allow both GET and POST for testing
 @app.post("/api/upload-logs")
+@app.get("/api/upload-logs")  # For testing
 async def upload_logs(
     files: List[UploadFile] = File(...),
     log_type: str = Form("auto")
 ):
-    """Upload and parse NGINX log files"""
+    """Upload and parse NGINX log files - FIXED ENDPOINT"""
     results = {
         "files_processed": [],
         "total_records": 0,
@@ -145,13 +143,12 @@ async def upload_logs(
             if detected_type != "error" and parsed:
                 alerts = detector.analyze_logs(parsed)
                 logs_data["alerts"].extend(alerts)
-            else:
-                alerts = []
+                results["alerts_found"] += len(alerts)
             
             # Store hash for tamper detection
             logs_data["file_hashes"][file.filename] = {
                 "hash": file_hash,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "size": len(content),
                 "type": detected_type
             }
@@ -161,10 +158,9 @@ async def upload_logs(
                 "type": detected_type,
                 "records": len(parsed),
                 "hash": file_hash,
-                "alerts": len(alerts)
+                "alerts": len(alerts) if 'alerts' in locals() else 0
             })
             results["total_records"] += len(parsed)
-            results["alerts_found"] += len(alerts)
             
             logger.info(f"Parsed {len(parsed)} records from {file.filename}")
             
@@ -180,34 +176,59 @@ async def upload_logs(
     if logs_data["parsed_logs"]:
         update_metrics()
     
-    # Broadcast update via WebSocket
-    if results["total_records"] > 0:
-        await manager.broadcast({
-            "type": "upload_complete",
-            "records": results["total_records"],
-            "alerts": results["alerts_found"]
-        })
-    
+    logger.info(f"Upload complete: {results}")
     return results
 
 @app.get("/api/metrics")
 async def get_metrics(time_range: str = "24h"):
     """Get aggregated metrics for dashboard"""
     if not logs_data["parsed_logs"]:
-        return {"error": "No logs loaded", "total_requests": 0}
+        return {
+            "total_requests": 0,
+            "unique_ips": 0,
+            "total_bytes": 0,
+            "status_4xx": 0,
+            "status_5xx": 0,
+            "error_rate": 0.0
+        }
     
     # Filter by time range
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     cutoff = get_cutoff_time(time_range)
     
     filtered_logs = [
         log for log in logs_data["parsed_logs"] 
-        if hasattr(log, 'timestamp') and log.timestamp >= cutoff
+        if log.timestamp >= cutoff
     ]
     
+    if not filtered_logs:
+        return {
+            "total_requests": 0,
+            "unique_ips": 0,
+            "total_bytes": 0,
+            "status_4xx": 0,
+            "status_5xx": 0,
+            "error_rate": 0.0
+        }
+    
     # Calculate metrics
-    metrics = calculate_metrics(filtered_logs)
-    return metrics.dict()
+    total_requests = len(filtered_logs)
+    unique_ips = len(set(log.client_ip for log in filtered_logs))
+    total_bytes = sum(log.bytes_sent for log in filtered_logs if log.bytes_sent)
+    
+    status_4xx = sum(1 for log in filtered_logs if 400 <= log.status < 500)
+    status_5xx = sum(1 for log in filtered_logs if 500 <= log.status < 600)
+    
+    error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
+    
+    return {
+        "total_requests": total_requests,
+        "unique_ips": unique_ips,
+        "total_bytes": total_bytes,
+        "status_4xx": status_4xx,
+        "status_5xx": status_5xx,
+        "error_rate": error_rate
+    }
 
 @app.get("/api/logs")
 async def get_logs(
@@ -215,9 +236,7 @@ async def get_logs(
     limit: int = 100,
     ip_filter: Optional[str] = None,
     status_filter: Optional[str] = None,
-    endpoint_filter: Optional[str] = None,
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None
+    time_start: Optional[str] = None
 ):
     """Get filtered logs with pagination"""
     logs = logs_data["parsed_logs"]
@@ -233,21 +252,10 @@ async def get_logs(
         if status_filter and str(log.status) != status_filter:
             include = False
         
-        if endpoint_filter and endpoint_filter not in log.endpoint:
-            include = False
-        
         if time_start:
             try:
                 start_time = datetime.fromisoformat(time_start.replace('Z', '+00:00'))
                 if log.timestamp < start_time:
-                    include = False
-            except:
-                pass
-        
-        if time_end:
-            try:
-                end_time = datetime.fromisoformat(time_end.replace('Z', '+00:00'))
-                if log.timestamp > end_time:
                     include = False
             except:
                 pass
@@ -272,41 +280,39 @@ async def get_logs(
     }
 
 @app.get("/api/alerts")
-async def get_alerts(severity: Optional[str] = None, limit: int = 50):
+async def get_alerts(limit: int = 50):
     """Get security alerts"""
     alerts = logs_data["alerts"]
     
     # Sort by timestamp (newest first)
     alerts.sort(key=lambda x: x.timestamp, reverse=True)
-    
-    if severity:
-        alerts = [alert for alert in alerts if alert.attack_type == severity]
-    
     alerts = alerts[:limit]
     
-    return {"alerts": [alert.dict() for alert in alerts]}
+    # Convert to dict with proper serialization
+    alert_dicts = []
+    for alert in alerts:
+        alert_dict = alert.dict()
+        alert_dict["timestamp"] = alert.timestamp.isoformat()
+        alert_dict["attack_type"] = alert.attack_type.value
+        alert_dicts.append(alert_dict)
+    
+    return {"alerts": alert_dicts}
 
 @app.get("/api/top-data")
 async def get_top_data(
     category: str = "ips",
-    limit: int = 10,
-    time_range: str = "24h"
+    limit: int = 10
 ):
     """Get top data for charts"""
     if not logs_data["parsed_logs"]:
-        return {"error": "No logs loaded", "labels": [], "values": []}
+        return {"labels": [], "values": []}
     
-    # Filter by time
-    cutoff = get_cutoff_time(time_range)
-    filtered_logs = [
-        log for log in logs_data["parsed_logs"] 
-        if log.timestamp >= cutoff
-    ]
+    logs = logs_data["parsed_logs"]
     
     if category == "ips":
         # Top IPs by request count
         ip_counts = {}
-        for log in filtered_logs:
+        for log in logs:
             ip_counts[log.client_ip] = ip_counts.get(log.client_ip, 0) + 1
         
         top_data = sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
@@ -318,7 +324,7 @@ async def get_top_data(
     elif category == "endpoints":
         # Top endpoints by request count
         endpoint_counts = {}
-        for log in filtered_logs:
+        for log in logs:
             endpoint_counts[log.endpoint] = endpoint_counts.get(log.endpoint, 0) + 1
         
         top_data = sorted(endpoint_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
@@ -330,7 +336,7 @@ async def get_top_data(
     elif category == "user_agents":
         # Top user-agents
         ua_counts = {}
-        for log in filtered_logs:
+        for log in logs:
             if log.user_agent and log.user_agent != '-':
                 ua = log.user_agent[:50]
                 ua_counts[ua] = ua_counts.get(ua, 0) + 1
@@ -344,13 +350,15 @@ async def get_top_data(
     elif category == "status_codes":
         # Status code distribution
         status_counts = {}
-        for log in filtered_logs:
+        for log in logs:
             status = str(log.status)
             status_counts[status] = status_counts.get(status, 0) + 1
         
+        # Sort by status code
+        sorted_codes = sorted(status_counts.items(), key=lambda x: x[0])
         return {
-            "labels": list(status_counts.keys()),
-            "values": list(status_counts.values())
+            "labels": [item[0] for item in sorted_codes],
+            "values": [item[1] for item in sorted_codes]
         }
     
     else:
@@ -363,7 +371,7 @@ async def get_timeline(
 ):
     """Get timeline data for charts"""
     if not logs_data["parsed_logs"]:
-        return {"error": "No logs loaded", "timestamps": [], "request_counts": []}
+        return {"timestamps": [], "request_counts": []}
     
     # Filter by time
     cutoff = get_cutoff_time(time_range)
@@ -398,10 +406,8 @@ async def get_timeline(
         "request_counts": [item[1] for item in sorted_timeline]
     }
 
-@app.post("/api/export")
-async def export_logs(
-    format: str = "csv"
-):
+@app.get("/api/export")
+async def export_logs(format: str = "csv"):
     """Export filtered logs to CSV or JSON"""
     logs = logs_data["parsed_logs"]
     
@@ -409,22 +415,15 @@ async def export_logs(
         raise HTTPException(status_code=400, detail="No logs to export")
     
     # Convert to list of dicts
-    log_dicts = [log.dict() for log in logs]
+    log_dicts = []
+    for log in logs:
+        d = log.dict()
+        d['timestamp'] = log.timestamp.isoformat()
+        log_dicts.append(d)
     
     if format.lower() == "csv":
         # Create CSV
         df = pd.DataFrame(log_dicts)
-        
-        # Fix datetime serialization
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                try:
-                    # Check if column contains datetime objects
-                    if any(isinstance(x, datetime) for x in df[col] if x is not None):
-                        df[col] = df[col].apply(lambda x: x.isoformat() if x and isinstance(x, datetime) else x)
-                except:
-                    pass
-        
         csv_path = "/tmp/exported_logs.csv"
         df.to_csv(csv_path, index=False)
         return FileResponse(
@@ -434,15 +433,10 @@ async def export_logs(
         )
     
     elif format.lower() == "json":
-        # Create JSON with proper datetime serialization
-        def json_serializer(obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            raise TypeError(f"Type {type(obj)} not serializable")
-        
+        # Create JSON
         json_path = "/tmp/exported_logs.json"
         with open(json_path, 'w') as f:
-            json.dump(log_dicts, f, indent=2, default=json_serializer)
+            json.dump(log_dicts, f, indent=2)
         return FileResponse(
             json_path, 
             filename="nginx_logs_export.json",
@@ -461,7 +455,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_json({
             "type": "connection_established",
             "message": "Connected to ForenX-NGINX Sentinel",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "log_count": len(logs_data["parsed_logs"])
         })
         
@@ -470,7 +464,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(30)
             await websocket.send_json({
                 "type": "heartbeat", 
-                "time": datetime.now().isoformat(),
+                "time": datetime.now(timezone.utc).isoformat(),
                 "log_count": len(logs_data["parsed_logs"])
             })
             
@@ -480,66 +474,30 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
-def calculate_metrics(logs: List[LogEntry]) -> AggregatedMetrics:
-    """Calculate aggregated metrics from logs"""
-    if not logs:
-        return AggregatedMetrics()
-    
-    total_requests = len(logs)
-    unique_ips = len(set(log.client_ip for log in logs))
-    total_bytes = sum(log.bytes_sent for log in logs if log.bytes_sent)
-    
-    # Status code counts
-    status_2xx = sum(1 for log in logs if 200 <= log.status < 300)
-    status_3xx = sum(1 for log in logs if 300 <= log.status < 400)
-    status_4xx = sum(1 for log in logs if 400 <= log.status < 500)
-    status_5xx = sum(1 for log in logs if 500 <= log.status < 600)
-    
-    # Error rate
-    error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
-    
-    # Request methods
-    methods = {}
-    for log in logs:
-        methods[log.method] = methods.get(log.method, 0) + 1
-    
-    # Top endpoints (by request count)
-    endpoint_counts = {}
-    for log in logs:
-        endpoint_counts[log.endpoint] = endpoint_counts.get(log.endpoint, 0) + 1
-    top_endpoints = sorted(endpoint_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    
-    # Top IPs (by request count)
-    ip_counts = {}
-    for log in logs:
-        ip_counts[log.client_ip] = ip_counts.get(log.client_ip, 0) + 1
-    top_ips = sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    
-    return AggregatedMetrics(
-        total_requests=total_requests,
-        unique_ips=unique_ips,
-        total_bytes=total_bytes,
-        status_2xx=status_2xx,
-        status_3xx=status_3xx,
-        status_4xx=status_4xx,
-        status_5xx=status_5xx,
-        error_rate=error_rate,
-        request_methods=methods,
-        top_endpoints=dict(top_endpoints),
-        top_ips=dict(top_ips),
-        timeframe_min=min(log.timestamp for log in logs) if logs else None,
-        timeframe_max=max(log.timestamp for log in logs) if logs else None
-    )
-
 def update_metrics():
     """Update global metrics"""
     if logs_data["parsed_logs"]:
-        logs_data["metrics"] = calculate_metrics(logs_data["parsed_logs"])
+        # Simple metrics calculation
+        logs = logs_data["parsed_logs"]
+        total_requests = len(logs)
+        unique_ips = len(set(log.client_ip for log in logs))
+        total_bytes = sum(log.bytes_sent for log in logs if log.bytes_sent)
+        status_4xx = sum(1 for log in logs if 400 <= log.status < 500)
+        status_5xx = sum(1 for log in logs if 500 <= log.status < 600)
+        error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
+        
+        logs_data["metrics"] = {
+            "total_requests": total_requests,
+            "unique_ips": unique_ips,
+            "total_bytes": total_bytes,
+            "status_4xx": status_4xx,
+            "status_5xx": status_5xx,
+            "error_rate": error_rate
+        }
 
-# Update the get_cutoff_time function
 def get_cutoff_time(time_range: str) -> datetime:
     """Convert time range string to cutoff datetime"""
-    now = datetime.now(timezone.utc)  # Make it timezone aware
+    now = datetime.now(timezone.utc)
     
     if time_range == "1h":
         return now - timedelta(hours=1)
@@ -554,7 +512,7 @@ def get_cutoff_time(time_range: str) -> datetime:
     elif time_range == "30d":
         return now - timedelta(days=30)
     else:
-        return datetime.min.replace(tzinfo=timezone.utc)  # Make min aware too
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 # Create uploads directory
 os.makedirs("uploads", exist_ok=True)
