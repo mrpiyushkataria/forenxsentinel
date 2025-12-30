@@ -3,7 +3,7 @@
  * Main JavaScript for the forensic dashboard
  */
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = '/api';
 let currentView = 'dashboard';
 let currentLogsPage = 1;
 let logsTotalPages = 1;
