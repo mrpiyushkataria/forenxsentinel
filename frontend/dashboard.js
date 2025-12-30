@@ -1,6 +1,6 @@
 /**
  * ForenX-NGINX Sentinel Dashboard
- * Main JavaScript for the forensic dashboard - FIXED VERSION
+ * Main JavaScript for the forensic dashboard - ENHANCED VERSION
  */
 
 const API_BASE = '/api';  // Use relative path
@@ -17,6 +17,11 @@ let statusChart = null;
 let endpointsChart = null;
 let userAgentsChart = null;
 let methodsChart = null;
+let dailyChart = null;
+let weeklyChart = null;
+let monthlyChart = null;
+let errorTrendChart = null;
+let timelineViewChart = null;
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
@@ -102,6 +107,12 @@ function showAnalyticsView() {
     loadAnalytics();
 }
 
+function showHistoricalView() {
+    switchView('historical', 'Historical Analytics', 'Long-term trends and patterns analysis');
+    loadHistoricalMetrics();
+    loadPeriodComparison();
+}
+
 function showTimelineView() {
     switchView('timeline', 'Timeline Forensics', 'Interactive timeline with attack markers');
     loadTimelineViewData();
@@ -109,7 +120,6 @@ function showTimelineView() {
 
 function showRealTimeView() {
     switchView('realtime', 'Real-time Monitor', 'Live log streaming and monitoring');
-    // Real-time view specific initialization
 }
 
 function showSettings() {
@@ -140,7 +150,14 @@ function switchView(viewName, title, subtitle) {
     document.querySelectorAll('.sidebar-item').forEach(item => {
         item.classList.remove('active');
     });
-    // Note: This is simplified - you'd need to map view names to sidebar items
+    
+    // Activate the clicked sidebar item
+    const activeItem = Array.from(document.querySelectorAll('.sidebar-item')).find(item => 
+        item.textContent.includes(title.split(' ')[0])
+    );
+    if (activeItem) {
+        activeItem.classList.add('active');
+    }
     
     currentView = viewName;
 }
@@ -405,12 +422,49 @@ async function loadMethodsFromLogs() {
     }
 }
 
-async function loadTimelineViewData() {
-    // To be implemented for timeline view
-    showToast('Timeline view will be implemented in Phase 2', 'info');
+async function loadHistoricalMetrics() {
+    try {
+        const response = await fetch(`${API_BASE}/historical/metrics`);
+        if (response.ok) {
+            const data = await response.json();
+            updateHistoricalCharts(data);
+            changeErrorTrend('daily'); // Initialize error trend chart
+        }
+    } catch (error) {
+        console.error('Error loading historical metrics:', error);
+    }
 }
 
-// UI Update Functions - FIXED VERSION
+async function loadPeriodComparison() {
+    try {
+        const response = await fetch(`${API_BASE}/compare/periods`);
+        if (response.ok) {
+            const data = await response.json();
+            updateComparisonChart(data);
+        }
+    } catch (error) {
+        console.error('Error loading period comparison:', error);
+    }
+}
+
+async function loadTimelineViewData() {
+    try {
+        const mode = document.getElementById('timelineMode')?.value || 'requests';
+        const range = document.getElementById('timelineViewRange')?.value || '7d';
+        
+        // Get timeline data
+        const response = await fetch(`${API_BASE}/timeline?interval=day&time_range=${range}`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        createTimelineViewChart(data, mode);
+        
+    } catch (error) {
+        console.error('Error loading timeline view data:', error);
+    }
+}
+
+// UI Update Functions
 function updateStatsCards(metrics) {
     const statsRow = document.getElementById('statsRow');
     
@@ -1110,6 +1164,498 @@ function updateMethodsChart(methodCounts) {
     });
 }
 
+// Historical Analytics Functions
+function updateHistoricalCharts(data) {
+    // Daily requests chart
+    if (data.daily && data.daily.length > 0) {
+        createDailyChart(data.daily);
+    }
+    
+    // Weekly trends chart
+    if (data.weekly && data.weekly.length > 0) {
+        createWeeklyChart(data.weekly);
+    }
+    
+    // Monthly summary chart
+    if (data.monthly && data.monthly.length > 0) {
+        createMonthlyChart(data.monthly);
+    }
+}
+
+function createDailyChart(dailyData) {
+    const canvas = document.getElementById('dailyChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Clear existing chart
+    if (dailyChart) {
+        dailyChart.destroy();
+    }
+    
+    const labels = dailyData.map(d => d.date.split('-').slice(1).join('-'));
+    const requests = dailyData.map(d => d.requests);
+    const errors = dailyData.map(d => d.errors);
+    const uniqueIps = dailyData.map(d => d.unique_ips);
+    
+    dailyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Requests',
+                    data: requests,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Errors',
+                    data: errors,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Unique IPs',
+                    data: uniqueIps,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            stacked: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Daily Traffic Overview (Last 30 Days)'
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                        display: true,
+                        text: 'Requests & Errors'
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: {
+                        display: true,
+                        text: 'Unique IPs'
+                    },
+                    grid: {
+                        drawOnChartArea: false,
+                    },
+                }
+            }
+        }
+    });
+}
+
+function createWeeklyChart(weeklyData) {
+    const canvas = document.getElementById('weeklyChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Clear existing chart
+    if (weeklyChart) {
+        weeklyChart.destroy();
+    }
+    
+    const labels = weeklyData.map(w => `Week ${w.week.split('-W')[1]}`);
+    const requests = weeklyData.map(w => w.requests);
+    const errorRate = weeklyData.map(w => w.error_rate * 100);
+    
+    weeklyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Requests',
+                    data: requests,
+                    backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                    borderColor: '#3b82f6',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Error Rate %',
+                    data: errorRate,
+                    type: 'line',
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Weekly Trends'
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Requests'
+                    }
+                },
+                y1: {
+                    position: 'right',
+                    beginAtZero: true,
+                    max: 100,
+                    title: {
+                        display: true,
+                        text: 'Error Rate %'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createMonthlyChart(monthlyData) {
+    const canvas = document.getElementById('monthlyChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Clear existing chart
+    if (monthlyChart) {
+        monthlyChart.destroy();
+    }
+    
+    const labels = monthlyData.map(m => {
+        const [year, month] = m.month.split('-');
+        return `${year}-${month}`;
+    });
+    
+    const requests = monthlyData.map(m => m.requests);
+    const uniqueIps = monthlyData.map(m => m.unique_ips);
+    
+    // Calculate average requests per IP
+    const avgPerIp = monthlyData.map(m => 
+        m.unique_ips > 0 ? (m.requests / m.unique_ips).toFixed(1) : 0
+    );
+    
+    monthlyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Total Requests',
+                    data: requests,
+                    backgroundColor: 'rgba(139, 92, 246, 0.7)',
+                    borderColor: '#8b5cf6',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Unique IPs',
+                    data: uniqueIps,
+                    backgroundColor: 'rgba(16, 185, 129, 0.7)',
+                    borderColor: '#10b981',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Avg Requests per IP',
+                    data: avgPerIp,
+                    type: 'line',
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    borderWidth: 2,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Monthly Summary'
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Count'
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function changeErrorTrend(period) {
+    try {
+        const response = await fetch(`${API_BASE}/historical/metrics`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        let trendData = [];
+        
+        if (period === 'daily' && data.daily) {
+            trendData = data.daily.slice(-14); // Last 14 days
+        } else if (period === 'weekly' && data.weekly) {
+            trendData = data.weekly;
+        } else if (period === 'monthly' && data.monthly) {
+            trendData = data.monthly;
+        }
+        
+        if (trendData.length > 0) {
+            createErrorTrendChart(trendData, period);
+        }
+    } catch (error) {
+        console.error('Error loading error trend:', error);
+    }
+}
+
+function createErrorTrendChart(data, period) {
+    const canvas = document.getElementById('errorTrendChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Clear existing chart
+    if (errorTrendChart) {
+        errorTrendChart.destroy();
+    }
+    
+    const labels = data.map(d => {
+        if (period === 'daily') return d.date.split('-').slice(1).join('-');
+        if (period === 'weekly') return `Week ${d.week.split('-W')[1]}`;
+        if (period === 'monthly') return d.month.split('-')[1];
+        return '';
+    });
+    
+    const errorRates = data.map(d => d.error_rate * 100);
+    
+    errorTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Error Rate %',
+                data: errorRates,
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: {
+                        callback: value => value + '%'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateComparisonChart(data) {
+    const comparisonDiv = document.getElementById('periodComparison');
+    if (!comparisonDiv) return;
+    
+    if (!data.current || !data.previous) {
+        comparisonDiv.innerHTML = '<div class="alert alert-light">Not enough data for comparison</div>';
+        return;
+    }
+    
+    let html = '<div class="row g-3">';
+    
+    const metrics = ['requests', 'unique_ips', 'errors', 'error_rate'];
+    const metricNames = {
+        'requests': 'Requests',
+        'unique_ips': 'Unique IPs',
+        'errors': 'Errors',
+        'error_rate': 'Error Rate'
+    };
+    const metricIcons = {
+        'requests': 'fa-globe',
+        'unique_ips': 'fa-network-wired',
+        'errors': 'fa-exclamation-triangle',
+        'error_rate': 'fa-percentage'
+    };
+    
+    metrics.forEach(metric => {
+        const current = metric === 'error_rate' 
+            ? (data.current[metric] * 100).toFixed(1) + '%'
+            : data.current[metric].toLocaleString();
+        
+        const previous = metric === 'error_rate'
+            ? (data.previous[metric] * 100).toFixed(1) + '%'
+            : data.previous[metric].toLocaleString();
+        
+        const change = data.changes[metric];
+        const isPositive = metric === 'error_rate' ? change < 0 : change > 0;
+        const changeClass = isPositive ? 'comparison-positive' : 'comparison-negative';
+        const changeIcon = isPositive ? 'fa-arrow-up' : 'fa-arrow-down';
+        const changeText = Math.abs(change).toFixed(1);
+        
+        html += `
+        <div class="col-md-6 col-lg-3">
+            <div class="stat-card">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">${metricNames[metric]}</h6>
+                        <h4 class="mb-0">${current}</h4>
+                        <small class="text-muted">Previous: ${previous}</small>
+                    </div>
+                    <div class="stat-icon" style="background: #e0f2fe; color: #0369a1;">
+                        <i class="fas ${metricIcons[metric]}"></i>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <small class="${changeClass} fw-bold">
+                        <i class="fas ${changeIcon} me-1"></i>
+                        ${metric === 'error_rate' ? changeText + ' pp' : changeText + '%'}
+                        ${metric === 'error_rate' ? (isPositive ? 'improvement' : 'increase') : (isPositive ? 'increase' : 'decrease')}
+                    </small>
+                </div>
+            </div>
+        </div>
+        `;
+    });
+    
+    html += '</div>';
+    comparisonDiv.innerHTML = html;
+}
+
+function createTimelineViewChart(data, mode) {
+    const canvas = document.getElementById('timelineViewChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Clear existing chart
+    if (timelineViewChart) {
+        timelineViewChart.destroy();
+    }
+    
+    const timestamps = data.timestamps || [];
+    const requestCounts = data.request_counts || [];
+    
+    if (timestamps.length === 0) {
+        timelineViewChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['No data'],
+                datasets: [{
+                    label: 'Requests',
+                    data: [0],
+                    borderColor: '#e2e8f0',
+                    backgroundColor: 'rgba(226, 232, 240, 0.1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'No timeline data available'
+                    }
+                }
+            }
+        });
+        return;
+    }
+    
+    timelineViewChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: timestamps,
+            datasets: [{
+                label: 'Requests',
+                data: requestCounts,
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                borderWidth: 2,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Historical Timeline'
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
 // Utility Functions
 function formatBytes(bytes) {
     if (bytes === 0 || !bytes) return '0 B';
@@ -1220,17 +1766,28 @@ async function uploadLogs() {
             modal.hide();
         }
         
-        // Wait a moment for backend to process, then reload dashboard
+        // Wait a moment for backend to process, then reload current view
         setTimeout(() => {
-            loadDashboardData();
-            if (currentView === 'logs') {
-                loadLogs();
-            }
-            if (currentView === 'analytics') {
-                loadAnalytics();
-            }
-            if (currentView === 'alerts') {
-                loadAlerts();
+            switch(currentView) {
+                case 'dashboard':
+                    loadDashboardData();
+                    break;
+                case 'logs':
+                    loadLogs();
+                    break;
+                case 'analytics':
+                    loadAnalytics();
+                    break;
+                case 'historical':
+                    loadHistoricalMetrics();
+                    loadPeriodComparison();
+                    break;
+                case 'timeline':
+                    loadTimelineViewData();
+                    break;
+                case 'alerts':
+                    loadAlerts();
+                    break;
             }
         }, 1000);
         
