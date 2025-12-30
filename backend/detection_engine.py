@@ -1,5 +1,5 @@
 """
-Detection Engine - Identify attacks and suspicious patterns
+Detection Engine - Identify attacks and suspicious patterns - FIXED VERSION
 """
 from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
@@ -60,7 +60,7 @@ class DetectionEngine:
     BOT_USER_AGENTS = [
         'bot', 'crawler', 'spider', 'scraper', 'curl', 'wget',
         'python-requests', 'java', 'go-http-client', 'node-fetch',
-        'apache-httpclient', 'okhttp', 'libwww-perl'
+        'apache-httpclient', 'okhttp', 'libwww-perl', 'sqlmap'
     ]
     
     def __init__(self):
@@ -76,13 +76,18 @@ class DetectionEngine:
         self.endpoint_errors = defaultdict(list)
     
     def analyze_logs(self, logs: List[LogEntry]) -> List[AttackAlert]:
-        """Analyze logs and generate security alerts"""
+        """Analyze logs and generate security alerts - FIXED"""
         alerts = []
+        alert_seen = set()  # To avoid duplicate alerts
         
         for log in logs:
             # Check for individual attack patterns
             log_alerts = self.check_attack_patterns(log)
-            alerts.extend(log_alerts)
+            for alert in log_alerts:
+                alert_key = f"{alert.client_ip}:{alert.attack_type}:{alert.endpoint}"
+                if alert_key not in alert_seen:
+                    alerts.append(alert)
+                    alert_seen.add(alert_key)
         
         # Check for rate-based attacks
         rate_alerts = self.check_rate_based_attacks(logs)
@@ -113,7 +118,7 @@ class DetectionEngine:
                 log=log,
                 attack_type=AttackType.SQL_INJECTION,
                 confidence=0.85,
-                details="SQL injection pattern detected in request"
+                details=f"SQL injection pattern detected in request: {full_request[:50]}"
             ))
         
         # Check XSS
@@ -122,7 +127,7 @@ class DetectionEngine:
                 log=log,
                 attack_type=AttackType.XSS,
                 confidence=0.80,
-                details="Cross-site scripting pattern detected"
+                details=f"Cross-site scripting pattern detected: {full_request[:50]}"
             ))
         
         # Check Path Traversal
@@ -131,7 +136,7 @@ class DetectionEngine:
                 log=log,
                 attack_type=AttackType.PATH_TRAVERSAL,
                 confidence=0.90,
-                details="Path traversal attempt detected"
+                details=f"Path traversal attempt: {full_request[:50]}"
             ))
         
         # Check Common Exploits
@@ -140,7 +145,7 @@ class DetectionEngine:
                 log=log,
                 attack_type=AttackType.EXPLOIT_ATTEMPT,
                 confidence=0.75,
-                details="Common exploit pattern detected"
+                details=f"Common exploit pattern: {full_request[:50]}"
             ))
         
         # Check for suspicious user agents
@@ -149,16 +154,25 @@ class DetectionEngine:
                 log=log,
                 attack_type=AttackType.SCANNING,
                 confidence=0.70,
-                details=f"Suspicious user agent detected: {log.user_agent[:50]}"
+                details=f"Suspicious user agent: {log.user_agent[:50]}"
             ))
         
-        # Check for high error rates on specific endpoint (per log)
-        if log.status >= 400:
+        # Check for admin access attempts
+        if any(pattern in log.endpoint.lower() for pattern in ['/admin', '/wp-admin', '/administrator']):
             alerts.append(self.create_alert(
                 log=log,
                 attack_type=AttackType.SUSPICIOUS_ACTIVITY,
                 confidence=0.60,
-                details=f"Error {log.status} on endpoint {log.endpoint}"
+                details=f"Admin access attempt: {log.endpoint}"
+            ))
+        
+        # Check for sensitive file access
+        if any(pattern in log.endpoint.lower() for pattern in ['.env', '.git', 'config.', 'password']):
+            alerts.append(self.create_alert(
+                log=log,
+                attack_type=AttackType.EXPLOIT_ATTEMPT,
+                confidence=0.75,
+                details=f"Sensitive file access: {log.endpoint}"
             ))
         
         return alerts
@@ -169,49 +183,39 @@ class DetectionEngine:
         """Check for rate-based attacks (DoS, brute force)"""
         alerts = []
         
-        # Group requests by IP and time window
+        # Group requests by IP
         ip_requests = defaultdict(list)
         for log in logs:
             ip_requests[log.client_ip].append(log.timestamp)
         
         # Check each IP for high request rate
         for ip, timestamps in ip_requests.items():
-            if len(timestamps) < request_threshold:
+            if len(timestamps) < 10:  # Minimum threshold
                 continue
             
             # Sort timestamps
             timestamps.sort()
             
-            # Check for high frequency in time window
-            window_start = timestamps[0]
-            requests_in_window = 0
-            
-            for ts in timestamps:
-                if ts <= window_start + timedelta(minutes=time_window_minutes):
-                    requests_in_window += 1
-                else:
-                    # Slide window
-                    while timestamps and ts > window_start + timedelta(minutes=time_window_minutes):
-                        window_start = timestamps.pop(0)
-                        requests_in_window -= 1
-                    requests_in_window += 1
-                
-                if requests_in_window >= request_threshold:
-                    # Found potential DoS
-                    sample_log = next(log for log in logs if log.client_ip == ip)
-                    alerts.append(self.create_alert(
-                        log=sample_log,
-                        attack_type=AttackType.DOS,
-                        confidence=0.90,
-                        details=f"High request rate detected: {requests_in_window} requests in {time_window_minutes} minutes"
-                    ))
-                    break
+            # Simple check: requests per second
+            if len(timestamps) >= request_threshold:
+                # Get a sample log
+                sample_log = next((log for log in logs if log.client_ip == ip), None)
+                if sample_log:
+                    time_range = timestamps[-1] - timestamps[0]
+                    rps = len(timestamps) / max(time_range.total_seconds(), 1)
+                    
+                    if rps > 10:  # More than 10 requests per second
+                        alerts.append(self.create_alert(
+                            log=sample_log,
+                            attack_type=AttackType.DOS,
+                            confidence=0.90,
+                            details=f"High request rate: {len(timestamps)} requests ({rps:.1f}/sec) from {ip}"
+                        ))
         
         return alerts
     
     def check_data_exfiltration(self, logs: List[LogEntry],
-                               byte_threshold: int = 10000000,  # 10MB
-                               time_window_hours: int = 1) -> List[AttackAlert]:
+                               byte_threshold: int = 10000000) -> List[AttackAlert]:
         """Check for potential data exfiltration"""
         alerts = []
         
@@ -228,18 +232,15 @@ class DetectionEngine:
         for ip, total_bytes in ip_bytes.items():
             if total_bytes > byte_threshold:
                 # Get sample log
-                sample_log = ip_logs[ip][0]
-                
-                # Calculate time range
-                timestamps = [log.timestamp for log in ip_logs[ip]]
-                time_range = max(timestamps) - min(timestamps)
-                
-                alerts.append(self.create_alert(
-                    log=sample_log,
-                    attack_type=AttackType.DATA_EXFILTRATION,
-                    confidence=0.85 if time_range < timedelta(hours=time_window_hours) else 0.70,
-                    details=f"Large data transfer detected: {self.format_bytes(total_bytes)} in {time_range}"
-                ))
+                if ip_logs[ip]:
+                    sample_log = ip_logs[ip][0]
+                    
+                    alerts.append(self.create_alert(
+                        log=sample_log,
+                        attack_type=AttackType.DATA_EXFILTRATION,
+                        confidence=0.85,
+                        details=f"Large data transfer: {self.format_bytes(total_bytes)} from {ip}"
+                    ))
         
         return alerts
     
@@ -252,33 +253,34 @@ class DetectionEngine:
         # Filter for error responses
         error_logs = [log for log in logs if log.status in (401, 403, 404)]
         
-        # Group by IP and endpoint
-        ip_endpoint_errors = defaultdict(lambda: defaultdict(list))
+        # Group by IP
+        ip_errors = defaultdict(list)
         
         for log in error_logs:
-            key = f"{log.client_ip}:{log.endpoint}"
-            ip_endpoint_errors[log.client_ip][log.endpoint].append(log.timestamp)
+            ip_errors[log.client_ip].append((log.timestamp, log.endpoint))
         
-        # Check each IP+endpoint for rapid errors
-        for ip, endpoints in ip_endpoint_errors.items():
-            for endpoint, timestamps in endpoints.items():
-                if len(timestamps) >= error_threshold:
-                    # Check if errors are close in time
-                    timestamps.sort()
-                    time_range = timestamps[-1] - timestamps[0]
+        # Check each IP for rapid errors
+        for ip, errors in ip_errors.items():
+            if len(errors) >= error_threshold:
+                # Check time range
+                timestamps = [ts for ts, _ in errors]
+                timestamps.sort()
+                time_range = timestamps[-1] - timestamps[0]
+                
+                if time_range < timedelta(minutes=time_window_minutes):
+                    # Get endpoint with most errors
+                    endpoints = [ep for _, ep in errors]
+                    from collections import Counter
+                    common_endpoint = Counter(endpoints).most_common(1)[0][0]
                     
-                    if time_range < timedelta(minutes=time_window_minutes):
-                        # Get sample log
-                        sample_log = next(
-                            log for log in logs 
-                            if log.client_ip == ip and log.endpoint == endpoint
-                        )
-                        
+                    # Get sample log
+                    sample_log = next((log for log in logs if log.client_ip == ip and log.endpoint == common_endpoint), None)
+                    if sample_log:
                         alerts.append(self.create_alert(
                             log=sample_log,
                             attack_type=AttackType.BRUTE_FORCE,
                             confidence=0.95,
-                            details=f"Brute force attempt: {len(timestamps)} errors in {time_range.seconds//60} minutes"
+                            details=f"Brute force attempt: {len(errors)} errors in {time_range.seconds//60} minutes on {common_endpoint}"
                         ))
         
         return alerts
@@ -296,19 +298,18 @@ class DetectionEngine:
     
     def is_suspicious_user_agent(self, user_agent: str) -> bool:
         """Check if user agent is suspicious"""
+        if not user_agent or user_agent == '-':
+            return False
+        
         ua_lower = user_agent.lower()
         
-        # Check for bots
+        # Check for bots/scanning tools
         for bot in self.BOT_USER_AGENTS:
             if bot in ua_lower:
                 return True
         
-        # Check for missing or empty user agent
-        if not user_agent or user_agent == '-':
-            return True
-        
-        # Check for very short user agents
-        if len(user_agent) < 10:
+        # Check for sqlmap
+        if 'sqlmap' in ua_lower:
             return True
         
         return False
@@ -325,7 +326,7 @@ class DetectionEngine:
             status_code=log.status,
             confidence=confidence,
             details=details,
-            raw_log_sample=log.raw_log[:200]
+            raw_log_sample=log.raw_log[:200] if log.raw_log else None
         )
     
     @staticmethod
