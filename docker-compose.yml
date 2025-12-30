@@ -7,20 +7,25 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - ./logs:/var/log/nginx:ro
+      - ./sample_logs:/var/log/nginx:ro
+      - ./uploads:/app/uploads
     environment:
       - PYTHONPATH=/app
       - LOGS_DIR=/var/log/nginx
+      - PYTHONUNBUFFERED=1
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
 
   frontend:
-    image: nginx:alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
     ports:
       - "8080:80"
-    volumes:
-      - ./frontend:/usr/share/nginx/html
     depends_on:
       - backend
+    restart: unless-stopped
 
 volumes:
-  logs:
+  uploads:
+  sample_logs:
