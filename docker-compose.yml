@@ -1,20 +1,23 @@
-version: '3.8'
-
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app
-      - ./sample_logs:/var/log/nginx:ro
-      - ./uploads:/app/uploads
     environment:
-      - PYTHONPATH=/app
-      - LOGS_DIR=/var/log/nginx
-      - PYTHONUNBUFFERED=1
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - DEBUG=False
+      - REDIS_URL=redis://redis:6379/0
+      - GEOIP_DATABASE=/app/GeoLite2-City.mmdb
+      - MAX_LOG_SIZE=104857600
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./data/geolite2:/app/geolite2
+    depends_on:
+      - redis
     restart: unless-stopped
+    networks:
+      - forenxsentinel-network
 
   frontend:
     build:
@@ -25,7 +28,30 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    networks:
+      - forenxsentinel-network
 
-volumes:
-  uploads:
-  sample_logs:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    restart: unless-stopped
+    networks:
+      - forenxsentinel-network
+
+  nginx-example:
+    image: nginx:alpine
+    ports:
+      - "8081:80"
+    volumes:
+      - ./samples/nginx_logs:/var/log/nginx
+    networks:
+      - forenxsentinel-network
+    command: >
+      sh -c "nginx -g 'daemon off;'"
+
+networks:
+  forenxsentinel-network:
+    driver: bridge
