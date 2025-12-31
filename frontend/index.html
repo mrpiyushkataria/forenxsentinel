@@ -655,6 +655,9 @@
         </div>
     </div>
 
+
+    
+
     <!-- Upload Modal -->
     <div class="modal fade" id="uploadModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -743,6 +746,294 @@
             </div>
         </div>
     </div>
+
+
+    <!-- Interactive Map View -->
+<div id="mapView" style="display: none;">
+    <div class="chart-container">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5><i class="fas fa-globe-americas me-2"></i>Geographic Distribution Map</h5>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-outline-primary active" onclick="changeMapView('markers')">
+                    <i class="fas fa-map-marker-alt"></i> Markers
+                </button>
+                <button class="btn btn-sm btn-outline-primary" onclick="changeMapView('clusters')">
+                    <i class="fas fa-layer-group"></i> Clusters
+                </button>
+                <button class="btn btn-sm btn-outline-primary" onclick="changeMapView('heatmap')">
+                    <i class="fas fa-fire"></i> Heatmap
+                </button>
+            </div>
+        </div>
+        <div id="mapContainer" style="height: 600px; border-radius: 10px; overflow: hidden;"></div>
+        
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="stat-card">
+                    <h6>Geographic Summary</h6>
+                    <div id="geoSummary">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-primary"></div>
+                            <small class="text-muted">Loading...</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="stat-card">
+                    <h6>Top Countries</h6>
+                    <canvas id="countryChart" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Traffic Patterns View -->
+<div id="patternsView" style="display: none;">
+    <div class="chart-container">
+        <h5><i class="fas fa-wave-square me-2"></i>Traffic Pattern Analysis</h5>
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <select class="form-select" id="patternGranularity" onchange="loadPatterns()">
+                    <option value="minute">Per Minute</option>
+                    <option value="hourly" selected>Per Hour</option>
+                    <option value="daily">Per Day</option>
+                    <option value="weekly">Per Week</option>
+                    <option value="monthly">Per Month</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <select class="form-select" id="patternRange" onchange="loadPatterns()">
+                    <option value="1h">Last Hour</option>
+                    <option value="6h">Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="7d" selected>Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="chart-card">
+                    <canvas id="patternsChart" height="300"></canvas>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="chart-card">
+                    <h6>Pattern Statistics</h6>
+                    <div id="patternStats" class="mt-3">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-primary"></div>
+                            <small class="text-muted">Loading statistics...</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h6>Hourly Distribution</h6>
+                    <canvas id="hourlyDistributionChart" height="250"></canvas>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-card">
+                    <h6>Weekday Distribution</h6>
+                    <canvas id="weekdayDistributionChart" height="250"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bandwidth Analysis View -->
+<div id="bandwidthView" style="display: none;">
+    <div class="chart-container">
+        <h5><i class="fas fa-tachometer-alt me-2"></i>Bandwidth Analysis</h5>
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <select class="form-select" id="bandwidthGroup" onchange="loadBandwidthAnalysis()">
+                    <option value="ip">By IP Address</option>
+                    <option value="endpoint">By Endpoint</option>
+                    <option value="hour">By Hour of Day</option>
+                    <option value="day">By Day</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="number" class="form-control" id="topN" value="20" min="5" max="100" onchange="loadBandwidthAnalysis()">
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="chart-card">
+                    <canvas id="bandwidthChart" height="350"></canvas>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="chart-card">
+                    <h6>Bandwidth Summary</h6>
+                    <div id="bandwidthSummary" class="mt-3">
+                        <!-- Summary will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-card mt-4">
+            <h6>Bandwidth Over Time</h6>
+            <canvas id="bandwidthTimelineChart" height="250"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Warnings View -->
+<div id="warningsView" style="display: none;">
+    <div class="chart-container">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5><i class="fas fa-exclamation-circle me-2"></i>System Warnings</h5>
+            <button class="btn btn-sm btn-outline-primary" onclick="refreshWarnings()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="text-center">
+                        <h3 id="totalWarnings">0</h3>
+                        <small class="text-muted">Total Warnings</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-9">
+                <div class="stat-card">
+                    <h6>Warning Types</h6>
+                    <div id="warningTypesChart"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>IP Address</th>
+                        <th>Endpoint</th>
+                        <th>Status</th>
+                        <th>Warnings</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="warningsTable">
+                    <tr>
+                        <td colspan="6" class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm text-primary"></div>
+                            <small class="text-muted ms-2">Loading warnings...</small>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Speed Analysis View -->
+<div id="speedView" style="display: none;">
+    <div class="chart-container">
+        <h5><i class="fas fa-stopwatch me-2"></i>Speed Analysis</h5>
+        
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="text-center">
+                        <h3 id="avgResponseTime">0ms</h3>
+                        <small class="text-muted">Avg Response Time</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="text-center">
+                        <h3 id="p95ResponseTime">0ms</h3>
+                        <small class="text-muted">P95 Response Time</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="text-center">
+                        <h3 id="slowRequests">0</h3>
+                        <small class="text-muted">Slow Requests (>1s)</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="text-center">
+                        <h3 id="fastRequests">0</h3>
+                        <small class="text-muted">Fast Requests (<100ms)</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-lg-6">
+                <div class="chart-card">
+                    <h6>Response Time Distribution</h6>
+                    <canvas id="responseTimeChart" height="250"></canvas>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="chart-card">
+                    <h6>Performance Percentiles</h6>
+                    <canvas id="percentileChart" height="250"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-card mt-4">
+            <h6>Slowest Endpoints</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Requests</th>
+                            <th>Average</th>
+                            <th>P95</th>
+                            <th>Max</th>
+                            <th>Grade</th>
+                        </tr>
+                    </thead>
+                    <tbody id="slowEndpointsTable">
+                        <tr>
+                            <td colspan="6" class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-primary"></div>
+                                <small class="text-muted ms-2">Loading data...</small>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="chart-card mt-4">
+            <h6>Response Time by Hour</h6>
+            <canvas id="hourlySpeedChart" height="250"></canvas>
+        </div>
+    </div>
+</div>
+
+
+
+    
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="dashboard.js"></script>
