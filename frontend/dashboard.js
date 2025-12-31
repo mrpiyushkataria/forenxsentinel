@@ -22,6 +22,12 @@ let weeklyChart = null;
 let monthlyChart = null;
 let errorTrendChart = null;
 let timelineViewChart = null;
+let statusDonutChart = null;
+let statusTrendChart = null;
+let statusBarChart = null;
+let endpointTrafficChart = null;
+let hourlyPatternChart = null;
+let dailyPatternChart = null;
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
@@ -103,7 +109,7 @@ function showAlertsView() {
 }
 
 function showAnalyticsView() {
-    switchView('analytics', 'Analytics & Insights', 'Detailed traffic analysis and patterns');
+    switchView('analytics', 'Basic Analytics', 'Basic traffic analysis and patterns');
     loadAnalytics();
 }
 
@@ -120,6 +126,11 @@ function showTimelineView() {
 
 function showRealTimeView() {
     switchView('realtime', 'Real-time Monitor', 'Live log streaming and monitoring');
+}
+
+function showEnhancedAnalytics() {
+    switchView('enhancedAnalytics', 'Enhanced Analytics', 'Advanced status code and endpoint analysis');
+    loadEnhancedAnalytics();
 }
 
 function showSettings() {
@@ -162,7 +173,495 @@ function switchView(viewName, title, subtitle) {
     currentView = viewName;
 }
 
-// API Functions
+// Enhanced Analytics Functions
+async function loadEnhancedAnalytics() {
+    try {
+        console.log('Loading enhanced analytics...');
+        
+        // Load status code analysis
+        await loadStatusAnalysis();
+        
+        // Load endpoint analysis
+        await loadEndpointAnalysis();
+        
+        // Load pattern analysis
+        await loadPatternAnalysis();
+        
+        // Load endpoint stats table
+        await loadEndpointStatsTable();
+        
+        showToast('Enhanced analytics loaded successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error loading enhanced analytics:', error);
+        showToast('Error loading enhanced analytics', 'danger');
+    }
+}
+
+async function loadStatusAnalysis() {
+    try {
+        const response = await fetch(`${API_BASE}/status-analysis?detailed=true`);
+        if (!response.ok) throw new Error('Status analysis failed');
+        
+        const data = await response.json();
+        console.log('Status analysis data:', data);
+        
+        createStatusCodeDonutChart(data);
+        createStatusCodeTrendChart(data);
+        createStatusCodeBarChart(data);
+        
+    } catch (error) {
+        console.error('Error loading status analysis:', error);
+    }
+}
+
+async function loadEndpointAnalysis() {
+    try {
+        const response = await fetch(`${API_BASE}/endpoint-analysis?limit=15`);
+        if (!response.ok) throw new Error('Endpoint analysis failed');
+        
+        const data = await response.json();
+        console.log('Endpoint analysis data:', data);
+        
+        createEndpointTrafficChart(data);
+        
+    } catch (error) {
+        console.error('Error loading endpoint analysis:', error);
+    }
+}
+
+async function loadPatternAnalysis() {
+    try {
+        const response = await fetch(`${API_BASE}/pattern-analysis`);
+        if (!response.ok) throw new Error('Pattern analysis failed');
+        
+        const data = await response.json();
+        console.log('Pattern analysis data:', data);
+        
+        createHourlyPatternChart(data);
+        createDailyPatternChart(data);
+        
+    } catch (error) {
+        console.error('Error loading pattern analysis:', error);
+    }
+}
+
+async function loadEndpointStatsTable() {
+    try {
+        const response = await fetch(`${API_BASE}/endpoint-analysis?limit=20`);
+        if (!response.ok) throw new Error('Endpoint stats failed');
+        
+        const data = await response.json();
+        const tableBody = document.getElementById('endpointStatsTable');
+        
+        if (!tableBody) return;
+        
+        if (!data.endpoints || data.endpoints.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="6" class="text-center">No endpoint data available</td></tr>';
+            return;
+        }
+        
+        let html = '';
+        data.endpoints.forEach(endpoint => {
+            // Get top method
+            const methods = endpoint.methods || {};
+            const topMethod = Object.entries(methods)
+                .sort((a, b) => b[1] - a[1])[0] || ['N/A', 0];
+            
+            // Get top status code
+            const statusCodes = endpoint.status_codes || {};
+            const topStatus = Object.entries(statusCodes)
+                .sort((a, b) => b[1] - a[1])[0] || ['N/A', 0];
+            
+            html += `
+                <tr>
+                    <td><small>${truncateText(endpoint.endpoint, 40)}</small></td>
+                    <td><span class="badge bg-primary">${endpoint.count}</span></td>
+                    <td>
+                        <span class="badge method-${topMethod[0]}">
+                            ${topMethod[0]}: ${topMethod[1]}
+                        </span>
+                    </td>
+                    <td><span class="status-badge status-${topStatus[0][0]}xx">${topStatus[0]}</span></td>
+                    <td><small>${formatBytes(endpoint.avg_bytes)}</small></td>
+                    <td><small>${formatBytes(endpoint.total_bytes)}</small></td>
+                </tr>
+            `;
+        });
+        
+        tableBody.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading endpoint stats:', error);
+        const tableBody = document.getElementById('endpointStatsTable');
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="6" class="text-center">Error loading endpoint statistics</td></tr>';
+        }
+    }
+}
+
+// Enhanced Chart Creation Functions
+function createStatusCodeDonutChart(data) {
+    const canvas = document.getElementById('statusDonutChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart
+    if (statusDonutChart) {
+        statusDonutChart.destroy();
+    }
+    
+    const categories = ['2xx', '3xx', '4xx', '5xx'];
+    const counts = categories.map(cat => data.status_codes[cat]?.count || 0);
+    const percentages = categories.map(cat => data.status_codes[cat]?.percentage || 0);
+    
+    const colors = {
+        '2xx': '#10b981',
+        '3xx': '#f59e0b',
+        '4xx': '#ef4444',
+        '5xx': '#dc2626'
+    };
+    
+    statusDonutChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: categories.map((cat, i) => `${cat} (${percentages[i].toFixed(1)}%)`),
+            datasets: [{
+                data: counts,
+                backgroundColor: categories.map(cat => colors[cat]),
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { 
+                    position: 'right',
+                    labels: {
+                        font: {
+                            size: 11
+                        }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.raw || 0;
+                            const total = data.total_requests || 1;
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label.split(' (')[0]}: ${value} (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            cutout: '60%'
+        }
+    });
+}
+
+function createStatusCodeTrendChart(data) {
+    const canvas = document.getElementById('statusTrendChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart
+    if (statusTrendChart) {
+        statusTrendChart.destroy();
+    }
+    
+    const trends = data.trends || {};
+    const dates = Object.keys(trends).sort();
+    
+    // Limit to last 14 days for better visibility
+    const recentDates = dates.slice(-14);
+    
+    const categories = ['2xx', '3xx', '4xx', '5xx'];
+    const colors = {
+        '2xx': '#10b981',
+        '3xx': '#f59e0b',
+        '4xx': '#ef4444',
+        '5xx': '#dc2626'
+    };
+    
+    const datasets = categories.map(category => ({
+        label: category,
+        data: recentDates.map(date => trends[date]?.[category] || 0),
+        borderColor: colors[category],
+        backgroundColor: colors[category] + '20',
+        fill: false,
+        tension: 0.4,
+        borderWidth: 2
+    }));
+    
+    statusTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: recentDates,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { 
+                    position: 'top',
+                    labels: {
+                        font: {
+                            size: 11
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Requests',
+                        font: {
+                            size: 12
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createStatusCodeBarChart(data) {
+    const canvas = document.getElementById('statusBarChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart
+    if (statusBarChart) {
+        statusBarChart.destroy();
+    }
+    
+    const statusCodes = {};
+    Object.keys(data.status_codes || {}).forEach(category => {
+        if (data.status_codes[category]?.codes) {
+            Object.assign(statusCodes, data.status_codes[category].codes);
+        }
+    });
+    
+    const sortedCodes = Object.entries(statusCodes)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+    
+    if (sortedCodes.length === 0) {
+        canvas.parentElement.innerHTML = '<div class="alert alert-light">No status code data available</div>';
+        return;
+    }
+    
+    statusBarChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: sortedCodes.map(item => item[0]),
+            datasets: [{
+                label: 'Requests',
+                data: sortedCodes.map(item => item[1]),
+                backgroundColor: sortedCodes.map(item => {
+                    const code = parseInt(item[0]);
+                    if (code >= 200 && code < 300) return '#10b981';
+                    if (code >= 300 && code < 400) return '#f59e0b';
+                    if (code >= 400 && code < 500) return '#ef4444';
+                    return '#dc2626';
+                }),
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: {
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createEndpointTrafficChart(data) {
+    const canvas = document.getElementById('endpointTrafficChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart
+    if (endpointTrafficChart) {
+        endpointTrafficChart.destroy();
+    }
+    
+    const endpoints = data.endpoints || [];
+    const topEndpoints = endpoints.slice(0, 10);
+    
+    if (topEndpoints.length === 0) {
+        canvas.parentElement.innerHTML = '<div class="alert alert-light">No endpoint data available</div>';
+        return;
+    }
+    
+    endpointTrafficChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: topEndpoints.map(ep => {
+                const endpoint = ep.endpoint;
+                return endpoint.length > 30 ? endpoint.substring(0, 27) + '...' : endpoint;
+            }),
+            datasets: [{
+                label: 'Requests',
+                data: topEndpoints.map(ep => ep.count),
+                backgroundColor: '#3b82f6',
+                borderWidth: 0
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: function(context) {
+                            return topEndpoints[context[0].dataIndex]?.endpoint || '';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createHourlyPatternChart(data) {
+    const canvas = document.getElementById('hourlyPatternChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart
+    if (hourlyPatternChart) {
+        hourlyPatternChart.destroy();
+    }
+    
+    const hourly = data.hourly_patterns || {};
+    const hours = Object.keys(hourly).sort();
+    const counts = hours.map(hour => hourly[hour]);
+    
+    hourlyPatternChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: hours,
+            datasets: [{
+                label: 'Requests per Hour',
+                data: counts,
+                borderColor: '#8b5cf6',
+                backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Hour of Day'
+                    },
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Requests'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createDailyPatternChart(data) {
+    const canvas = document.getElementById('dailyPatternChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Destroy existing chart
+    if (dailyPatternChart) {
+        dailyPatternChart.destroy();
+    }
+    
+    const daily = data.daily_patterns || {};
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const counts = days.map(day => daily[day] || 0);
+    
+    dailyPatternChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: days.map(d => d.substring(0, 3)),
+            datasets: [{
+                label: 'Requests',
+                data: counts,
+                backgroundColor: days.map((_, i) => 
+                    i < 5 ? '#3b82f6' : '#8b5cf6' // Weekdays vs weekends
+                ),
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: {
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Requests'
+                    }
+                }
+            }
+        }
+    });
+}
+
+// API Functions (Original - Keep These)
 async function loadDashboardData() {
     try {
         console.log('Loading dashboard data...');
@@ -227,7 +726,7 @@ async function loadTopIps() {
     try {
         const response = await fetch(`${API_BASE}/top-data?category=ips&limit=10`);
         if (!response.ok) {
-            throw new Error(`Top IPs API error: ${response.status}`);
+            throw new Error(`Top IPs API error: ${metricsResponse.status}`);
         }
         const data = await response.json();
         
@@ -249,7 +748,7 @@ async function loadStatusDistribution() {
     try {
         const response = await fetch(`${API_BASE}/top-data?category=status_codes`);
         if (!response.ok) {
-            throw new Error(`Status API error: ${response.status}`);
+            throw new Error(`Status API error: ${metricsResponse.status}`);
         }
         const data = await response.json();
         
@@ -271,7 +770,7 @@ async function loadRecentAlerts() {
     try {
         const response = await fetch(`${API_BASE}/alerts?limit=5`);
         if (!response.ok) {
-            throw new Error(`Alerts API error: ${response.status}`);
+            throw new Error(`Alerts API error: ${metricsResponse.status}`);
         }
         const data = await response.json();
         
@@ -288,7 +787,7 @@ async function loadAttackTypes() {
     try {
         const response = await fetch(`${API_BASE}/alerts?limit=100`);
         if (!response.ok) {
-            throw new Error(`Attack types API error: ${response.status}`);
+            throw new Error(`Attack types API error: ${metricsResponse.status}`);
         }
         const data = await response.json();
         
@@ -345,7 +844,7 @@ async function loadLogs() {
     try {
         const response = await fetch(`${API_BASE}/logs?page=${currentLogsPage}&limit=100`);
         if (!response.ok) {
-            throw new Error(`Logs API error: ${response.status}`);
+            throw new Error(`Logs API error: ${metricsResponse.status}`);
         }
         const data = await response.json();
         
@@ -1787,6 +2286,9 @@ async function uploadLogs() {
                     break;
                 case 'alerts':
                     loadAlerts();
+                    break;
+                case 'enhancedAnalytics':
+                    loadEnhancedAnalytics();
                     break;
             }
         }, 1000);
