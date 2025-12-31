@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ForenX-NGINX Sentinel - Advanced NGINX Forensic Dashboard
-Backend Server with FastAPI - FINAL WORKING VERSION
+Enhanced Backend with GeoIP, Advanced Analytics, and Multi-Log Support
 """
 import os
 import json
@@ -10,12 +10,19 @@ import hashlib
 import asyncio
 import uvicorn
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional, Any
-from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException
+from typing import List, Dict, Optional, Any, Tuple
+from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import logging
+import geoip2.database
+from collections import defaultdict, Counter
+import re
+import csv
+import io
 
 # Import custom modules
 from log_parser import NGINXParser
@@ -27,15 +34,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="ForenX-NGINX Sentinel",
-    description="Advanced NGINX Log Forensic Dashboard",
-    version="1.0.0"
+    title="ForenX-NGINX Sentinel Pro",
+    description="Advanced NGINX Log Forensic Dashboard with GeoIP and Analytics",
+    version="2.0.0"
 )
 
-# CORS middleware - allow frontend access
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all for development
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,14 +52,27 @@ app.add_middleware(
 parser = NGINXParser()
 detector = DetectionEngine()
 
-# In-memory storage
+# Initialize GeoIP database (provide your own or use free version)
+geoip_reader = None
+try:
+    geoip_reader = geoip2.database.Reader('GeoLite2-City.mmdb')
+    logger.info("GeoIP database loaded successfully")
+except:
+    logger.warning("GeoIP database not found, geographic features will be limited")
+
+# In-memory storage with enhanced structure
 logs_data = {
     "access_logs": [],
     "error_logs": [],
     "parsed_logs": [],
     "alerts": [],
     "metrics": {},
-    "file_hashes": {}
+    "file_hashes": {},
+    "geo_data": {},  # Store geographic data
+    "hourly_patterns": {},
+    "daily_patterns": {},
+    "endpoint_stats": {},
+    "status_analysis": {}
 }
 
 class ConnectionManager:
@@ -78,9 +98,220 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+def get_ip_location(ip_address: str) -> Dict[str, Any]:
+    """Get geographic location for IP address"""
+    if not geoip_reader or ip_address in ['127.0.0.1', 'localhost']:
+        return None
+    
+    try:
+        response = geoip_reader.city(ip_address)
+        return {
+            "country": response.country.name,
+            "country_code": response.country.iso_code,
+            "city": response.city.name,
+            "latitude": response.location.latitude,
+            "longitude": response.location.longitude,
+            "timezone": response.location.time_zone
+        }
+    except:
+        return None
+
+def analyze_traffic_patterns(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Analyze traffic patterns for enhanced insights"""
+    patterns = {
+        "hourly_distribution": defaultdict(int),
+        "daily_distribution": defaultdict(int),
+        "weekly_distribution": defaultdict(int),
+        "peak_hours": [],
+        "trough_hours": [],
+        "avg_requests_per_hour": 0,
+        "busiest_day": None,
+        "quietest_day": None
+    }
+    
+    hourly_counts = defaultdict(int)
+    daily_counts = defaultdict(int)
+    weekday_counts = defaultdict(int)
+    
+    for log in logs:
+        if hasattr(log, 'timestamp'):
+            hour = log.timestamp.hour
+            day = log.timestamp.strftime("%Y-%m-%d")
+            weekday = log.timestamp.strftime("%A")
+            
+            hourly_counts[hour] += 1
+            daily_counts[day] += 1
+            weekday_counts[weekday] += 1
+    
+    # Calculate statistics
+    if hourly_counts:
+        patterns["hourly_distribution"] = dict(sorted(hourly_counts.items()))
+        total_requests = sum(hourly_counts.values())
+        patterns["avg_requests_per_hour"] = total_requests / len(hourly_counts)
+        
+        # Find peak and trough hours
+        max_hour = max(hourly_counts, key=hourly_counts.get)
+        min_hour = min(hourly_counts, key=hourly_counts.get)
+        
+        patterns["peak_hours"] = [
+            {"hour": hour, "count": count}
+            for hour, count in hourly_counts.items()
+            if count >= hourly_counts[max_hour] * 0.8  # Top 20%
+        ]
+        
+        patterns["trough_hours"] = [
+            {"hour": hour, "count": count}
+            for hour, count in hourly_counts.items()
+            if count <= hourly_counts[min_hour] * 1.2  # Bottom 20%
+        ]
+    
+    if daily_counts:
+        patterns["daily_distribution"] = dict(sorted(daily_counts.items()))
+    
+    if weekday_counts:
+        patterns["weekly_distribution"] = dict(weekday_counts)
+        patterns["busiest_day"] = max(weekday_counts, key=weekday_counts.get)
+        patterns["quietest_day"] = min(weekday_counts, key=weekday_counts.get)
+    
+    return patterns
+
+def analyze_endpoint_performance(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Analyze endpoint performance metrics"""
+    endpoint_stats = defaultdict(lambda: {
+        "count": 0,
+        "total_bytes": 0,
+        "avg_bytes": 0,
+        "response_times": [],
+        "status_codes": defaultdict(int),
+        "methods": defaultdict(int),
+        "unique_ips": set(),
+        "errors": 0
+    })
+    
+    for log in logs:
+        if hasattr(log, 'endpoint'):
+            endpoint = log.endpoint
+            stats = endpoint_stats[endpoint]
+            
+            stats["count"] += 1
+            
+            if hasattr(log, 'bytes_sent') and log.bytes_sent:
+                try:
+                    stats["total_bytes"] += int(log.bytes_sent)
+                except:
+                    pass
+            
+            if hasattr(log, 'request_time'):
+                try:
+                    stats["response_times"].append(float(log.request_time))
+                except:
+                    pass
+            
+            if hasattr(log, 'status'):
+                status = str(log.status)
+                stats["status_codes"][status] += 1
+                if 400 <= int(status) < 600:
+                    stats["errors"] += 1
+            
+            if hasattr(log, 'method'):
+                stats["methods"][log.method] += 1
+            
+            if hasattr(log, 'client_ip'):
+                stats["unique_ips"].add(log.client_ip)
+    
+    # Calculate averages and format response
+    result = {}
+    for endpoint, stats in endpoint_stats.items():
+        if stats["count"] > 0:
+            stats["avg_bytes"] = stats["total_bytes"] / stats["count"]
+            
+            # Calculate response time percentiles
+            if stats["response_times"]:
+                times = sorted(stats["response_times"])
+                stats["p50_response_time"] = np.percentile(times, 50) if times else 0
+                stats["p95_response_time"] = np.percentile(times, 95) if times else 0
+                stats["p99_response_time"] = np.percentile(times, 99) if times else 0
+                stats["avg_response_time"] = np.mean(times) if times else 0
+            else:
+                stats["p50_response_time"] = 0
+                stats["p95_response_time"] = 0
+                stats["p99_response_time"] = 0
+                stats["avg_response_time"] = 0
+            
+            # Convert sets to counts
+            stats["unique_ip_count"] = len(stats["unique_ips"])
+            stats.pop("unique_ips", None)
+            stats.pop("response_times", None)
+            
+            # Convert defaultdict to dict
+            stats["status_codes"] = dict(stats["status_codes"])
+            stats["methods"] = dict(stats["methods"])
+            
+            result[endpoint] = dict(stats)
+    
+    return result
+
+def generate_geo_distribution(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Generate geographic distribution data for map visualization"""
+    geo_data = {
+        "countries": defaultdict(int),
+        "cities": defaultdict(int),
+        "coordinates": [],
+        "total_requests_by_country": {},
+        "unique_ips_by_country": defaultdict(set)
+    }
+    
+    for log in logs:
+        if hasattr(log, 'client_ip'):
+            ip = log.client_ip
+            location = get_ip_location(ip)
+            
+            if location:
+                country = location.get("country", "Unknown")
+                city = location.get("city", "Unknown")
+                lat = location.get("latitude")
+                lon = location.get("longitude")
+                
+                geo_data["countries"][country] += 1
+                geo_data["cities"][city] += 1
+                geo_data["unique_ips_by_country"][country].add(ip)
+                
+                if lat and lon:
+                    geo_data["coordinates"].append({
+                        "ip": ip,
+                        "latitude": lat,
+                        "longitude": lon,
+                        "country": country,
+                        "city": city,
+                        "count": 1
+                    })
+    
+    # Aggregate coordinates by location
+    aggregated_coords = {}
+    for coord in geo_data["coordinates"]:
+        key = f"{coord['latitude']},{coord['longitude']}"
+        if key in aggregated_coords:
+            aggregated_coords[key]["count"] += 1
+        else:
+            aggregated_coords[key] = coord
+    
+    geo_data["coordinates"] = list(aggregated_coords.values())
+    
+    # Calculate total requests by country
+    for country, ips in geo_data["unique_ips_by_country"].items():
+        geo_data["total_requests_by_country"][country] = {
+            "requests": geo_data["countries"][country],
+            "unique_ips": len(ips)
+        }
+    
+    # Remove sets from final output
+    geo_data.pop("unique_ips_by_country", None)
+    
+    return geo_data
+
 @app.get("/")
 async def root():
-    return {"message": "ForenX-NGINX Sentinel API", "status": "running", "version": "1.0.0"}
+    return {"message": "ForenX-NGINX Sentinel Pro API", "status": "running", "version": "2.0.0"}
 
 @app.get("/api/health")
 async def health_check():
@@ -91,7 +322,7 @@ async def upload_logs(
     files: List[UploadFile] = File(...),
     log_type: str = Form("auto")
 ):
-    """Upload and parse NGINX log files"""
+    """Upload and parse NGINX log files with enhanced processing"""
     results = {
         "files_processed": [],
         "total_records": 0,
@@ -102,6 +333,11 @@ async def upload_logs(
     # Clear existing data
     logs_data["parsed_logs"] = []
     logs_data["alerts"] = []
+    logs_data["geo_data"] = {}
+    logs_data["hourly_patterns"] = {}
+    logs_data["daily_patterns"] = {}
+    logs_data["endpoint_stats"] = {}
+    logs_data["status_analysis"] = {}
     
     for file in files:
         try:
@@ -174,69 +410,175 @@ async def upload_logs(
                 "success": False
             })
     
-    # Update metrics if we have logs
+    # Update all analytics if we have logs
     if logs_data["parsed_logs"]:
-        update_metrics()
+        update_all_analytics()
     
     logger.info(f"Upload complete: {results}")
     return results
 
+def update_all_analytics():
+    """Update all analytics data after log upload"""
+    logs = logs_data["parsed_logs"]
+    
+    if not logs:
+        return
+    
+    # Update basic metrics
+    update_metrics()
+    
+    # Update traffic patterns
+    logs_data["hourly_patterns"] = analyze_traffic_patterns(logs)
+    
+    # Update endpoint performance
+    logs_data["endpoint_stats"] = analyze_endpoint_performance(logs)
+    
+    # Update geographic distribution
+    logs_data["geo_data"] = generate_geo_distribution(logs)
+    
+    # Update status analysis
+    logs_data["status_analysis"] = analyze_status_patterns(logs)
+    
+    logger.info("All analytics updated successfully")
+
+def analyze_status_patterns(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Analyze status code patterns"""
+    status_data = {
+        "distribution": defaultdict(int),
+        "by_hour": defaultdict(lambda: defaultdict(int)),
+        "by_endpoint": defaultdict(lambda: defaultdict(int)),
+        "trends": defaultdict(lambda: defaultdict(int)),
+        "error_sequences": []
+    }
+    
+    for log in logs:
+        if hasattr(log, 'status'):
+            status = str(log.status)
+            status_data["distribution"][status] += 1
+            
+            # Group by hour
+            if hasattr(log, 'timestamp'):
+                hour = log.timestamp.strftime("%H:00")
+                status_data["by_hour"][hour][status] += 1
+                
+                # Daily trends
+                day = log.timestamp.strftime("%Y-%m-%d")
+                status_data["trends"][day][status] += 1
+            
+            # Group by endpoint
+            if hasattr(log, 'endpoint'):
+                status_data["by_endpoint"][log.endpoint][status] += 1
+    
+    # Calculate percentages
+    total = len(logs)
+    status_data["percentages"] = {
+        status: (count / total * 100) 
+        for status, count in status_data["distribution"].items()
+    }
+    
+    # Find error sequences
+    error_sequences = []
+    error_window = []
+    
+    for log in logs:
+        if hasattr(log, 'status') and 400 <= int(log.status) < 600:
+            error_window.append(log)
+            if len(error_window) >= 5:  # Sequence of 5+ errors
+                if len(error_sequences) == 0 or error_sequences[-1]["end"] != log.timestamp:
+                    error_sequences.append({
+                        "start": error_window[0].timestamp,
+                        "end": log.timestamp,
+                        "count": len(error_window),
+                        "status_codes": [str(l.status) for l in error_window],
+                        "endpoints": [l.endpoint for l in error_window if hasattr(l, 'endpoint')]
+                    })
+                else:
+                    error_sequences[-1]["count"] += 1
+                error_window = []
+        else:
+            error_window = []
+    
+    status_data["error_sequences"] = error_sequences
+    
+    return dict(status_data)
+
 @app.get("/api/metrics")
-async def get_metrics(time_range: str = "24h"):
-    """Get aggregated metrics for dashboard - FIXED (NO TIME FILTERING)"""
-    logger.info(f"Getting metrics for time_range: {time_range}")
-    
+async def get_metrics(time_range: str = "24h", detailed: bool = False):
+    """Get enhanced metrics with optional details"""
     if not logs_data["parsed_logs"]:
-        logger.info("No parsed logs found, returning zeros")
         return {
             "total_requests": 0,
             "unique_ips": 0,
             "total_bytes": 0,
             "status_4xx": 0,
             "status_5xx": 0,
-            "error_rate": 0.0
+            "error_rate": 0.0,
+            "avg_response_time": 0.0,
+            "requests_per_second": 0.0,
+            "bandwidth_usage": 0.0
         }
     
-    logger.info(f"Total logs in memory: {len(logs_data['parsed_logs'])}")
+    logs = logs_data["parsed_logs"]
     
-    # DON'T filter by time - show all logs regardless of timestamp
-    filtered_logs = logs_data["parsed_logs"]
+    # Filter by time range if needed
+    if time_range != "all":
+        now = datetime.now(timezone.utc)
+        if time_range == "1h":
+            start_time = now - timedelta(hours=1)
+        elif time_range == "6h":
+            start_time = now - timedelta(hours=6)
+        elif time_range == "24h":
+            start_time = now - timedelta(hours=24)
+        elif time_range == "7d":
+            start_time = now - timedelta(days=7)
+        elif time_range == "30d":
+            start_time = now - timedelta(days=30)
+        else:
+            start_time = now - timedelta(hours=24)  # Default
+        
+        logs = [log for log in logs if hasattr(log, 'timestamp') and log.timestamp >= start_time]
     
-    logger.info(f"Using ALL logs (no time filter): {len(filtered_logs)}")
-    
-    if not filtered_logs:
+    if not logs:
         return {
             "total_requests": 0,
             "unique_ips": 0,
             "total_bytes": 0,
             "status_4xx": 0,
             "status_5xx": 0,
-            "error_rate": 0.0
+            "error_rate": 0.0,
+            "avg_response_time": 0.0,
+            "requests_per_second": 0.0,
+            "bandwidth_usage": 0.0
         }
     
-    # Calculate metrics
-    total_requests = len(filtered_logs)
+    # Calculate basic metrics
+    total_requests = len(logs)
     
-    # Get unique IPs
     unique_ips = set()
-    for log in filtered_logs:
+    for log in logs:
         if hasattr(log, 'client_ip') and log.client_ip:
             unique_ips.add(log.client_ip)
     unique_ips_count = len(unique_ips)
     
-    # Calculate bytes safely
     total_bytes = 0
-    for log in filtered_logs:
+    response_times = []
+    
+    for log in logs:
         if hasattr(log, 'bytes_sent') and log.bytes_sent:
             try:
                 total_bytes += int(log.bytes_sent)
             except:
                 pass
+        
+        if hasattr(log, 'request_time'):
+            try:
+                response_times.append(float(log.request_time))
+            except:
+                pass
     
-    # Calculate status codes safely
     status_4xx = 0
     status_5xx = 0
-    for log in filtered_logs:
+    for log in logs:
         if hasattr(log, 'status'):
             try:
                 status = int(log.status)
@@ -249,207 +591,128 @@ async def get_metrics(time_range: str = "24h"):
     
     error_rate = (status_4xx + status_5xx) / total_requests if total_requests > 0 else 0
     
+    # Calculate advanced metrics
+    avg_response_time = np.mean(response_times) if response_times else 0
+    
+    # Calculate time span for RPS
+    if len(logs) > 1:
+        timestamps = [log.timestamp for log in logs if hasattr(log, 'timestamp')]
+        if timestamps:
+            time_span = (max(timestamps) - min(timestamps)).total_seconds()
+            requests_per_second = total_requests / time_span if time_span > 0 else 0
+        else:
+            requests_per_second = 0
+    else:
+        requests_per_second = 0
+    
+    # Calculate bandwidth usage (MB per second)
+    bandwidth_usage = (total_bytes / 1024 / 1024) / (time_span if time_span > 0 else 1)
+    
     metrics = {
         "total_requests": total_requests,
         "unique_ips": unique_ips_count,
         "total_bytes": total_bytes,
         "status_4xx": status_4xx,
         "status_5xx": status_5xx,
-        "error_rate": error_rate
+        "error_rate": error_rate,
+        "avg_response_time": avg_response_time,
+        "requests_per_second": round(requests_per_second, 2),
+        "bandwidth_usage": round(bandwidth_usage, 2),
+        "formatted_bytes": format_bytes(total_bytes),
+        "formatted_bandwidth": f"{bandwidth_usage:.2f} MB/s"
     }
     
-    logger.info(f"Returning metrics: {metrics}")
-    return metrics
-
-@app.get("/api/logs")
-async def get_logs(
-    page: int = 1,
-    limit: int = 100,
-    ip_filter: Optional[str] = None,
-    status_filter: Optional[str] = None,
-    time_start: Optional[str] = None
-):
-    """Get filtered logs with pagination"""
-    logs = logs_data["parsed_logs"]
-    
-    logger.info(f"Getting logs page {page}, limit {limit}, total logs: {len(logs)}")
-    
-    # Apply filters
-    filtered_logs = []
-    for log in logs:
-        include = True
-        
-        if ip_filter and hasattr(log, 'client_ip'):
-            if ip_filter not in log.client_ip:
-                include = False
-        
-        if status_filter and hasattr(log, 'status'):
-            if str(log.status) != status_filter:
-                include = False
-        
-        if time_start and hasattr(log, 'timestamp'):
-            try:
-                start_time = datetime.fromisoformat(time_start.replace('Z', '+00:00'))
-                if log.timestamp < start_time:
-                    include = False
-            except:
-                pass
-        
-        if include:
-            filtered_logs.append(log)
-    
-    # Paginate
-    total = len(filtered_logs)
-    start = (page - 1) * limit
-    end = start + limit
-    paginated_logs = filtered_logs[start:end]
-    
-    # Convert to dict with proper serialization
-    log_dicts = []
-    for log in paginated_logs:
-        try:
-            log_dict = log.dict()
-            log_dicts.append(log_dict)
-        except Exception as e:
-            logger.error(f"Error serializing log: {e}")
-            continue
-    
-    response = {
-        "logs": log_dicts,
-        "pagination": {
-            "page": page,
-            "limit": limit,
-            "total": total,
-            "pages": (total + limit - 1) // limit if limit > 0 else 0
-        }
-    }
-    
-    logger.info(f"Returning {len(log_dicts)} logs")
-    return response
-
-@app.get("/api/alerts")
-async def get_alerts(limit: int = 50):
-    """Get security alerts"""
-    alerts = logs_data["alerts"]
-    
-    logger.info(f"Getting alerts, limit {limit}, total alerts: {len(alerts)}")
-    
-    # Sort by timestamp (newest first)
-    alerts.sort(key=lambda x: x.timestamp if hasattr(x, 'timestamp') else datetime.min, reverse=True)
-    alerts = alerts[:limit]
-    
-    # Convert to dict with proper serialization
-    alert_dicts = []
-    for alert in alerts:
-        try:
-            alert_dict = alert.dict()
-            alert_dicts.append(alert_dict)
-        except Exception as e:
-            logger.error(f"Error serializing alert: {e}")
-            continue
-    
-    logger.info(f"Returning {len(alert_dicts)} alerts")
-    return {"alerts": alert_dicts}
-
-@app.get("/api/top-data")
-async def get_top_data(
-    category: str = "ips",
-    limit: int = 10
-):
-    """Get top data for charts"""
-    logger.info(f"Getting top data for category: {category}")
-    
-    if not logs_data["parsed_logs"]:
-        logger.info("No parsed logs found, returning empty")
-        return {"labels": [], "values": []}
-    
-    logs = logs_data["parsed_logs"]
-    
-    if category == "ips":
-        # Top IPs by request count
-        ip_counts = {}
+    # Add detailed metrics if requested
+    if detailed:
+        # Method distribution
+        method_dist = defaultdict(int)
         for log in logs:
-            if hasattr(log, 'client_ip'):
-                ip = log.client_ip
-                ip_counts[ip] = ip_counts.get(ip, 0) + 1
+            if hasattr(log, 'method'):
+                method_dist[log.method] += 1
         
-        top_data = sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        result = {
-            "labels": [item[0] for item in top_data],
-            "values": [item[1] for item in top_data]
-        }
-        
-    elif category == "endpoints":
-        # Top endpoints by request count
-        endpoint_counts = {}
+        # Top endpoints
+        endpoint_dist = defaultdict(int)
         for log in logs:
             if hasattr(log, 'endpoint'):
-                endpoint = log.endpoint
-                endpoint_counts[endpoint] = endpoint_counts.get(endpoint, 0) + 1
+                endpoint_dist[log.endpoint] += 1
         
-        top_data = sorted(endpoint_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        result = {
-            "labels": [item[0] for item in top_data],
-            "values": [item[1] for item in top_data]
-        }
-        
-    elif category == "user_agents":
-        # Top user-agents
-        ua_counts = {}
-        for log in logs:
-            if hasattr(log, 'user_agent') and log.user_agent and log.user_agent != '-':
-                ua = log.user_agent[:50]
-                ua_counts[ua] = ua_counts.get(ua, 0) + 1
-        
-        top_data = sorted(ua_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        result = {
-            "labels": [item[0] for item in top_data],
-            "values": [item[1] for item in top_data]
-        }
-        
-    elif category == "status_codes":
-        # Status code distribution
-        status_counts = {}
-        for log in logs:
-            if hasattr(log, 'status'):
-                status = str(log.status)
-                status_counts[status] = status_counts.get(status, 0) + 1
-        
-        # Sort by status code
-        sorted_codes = sorted(status_counts.items(), key=lambda x: x[0])
-        result = {
-            "labels": [item[0] for item in sorted_codes],
-            "values": [item[1] for item in sorted_codes]
-        }
-        
-    else:
-        result = {"labels": [], "values": []}
+        metrics.update({
+            "method_distribution": dict(method_dist),
+            "top_endpoints": dict(sorted(endpoint_dist.items(), key=lambda x: x[1], reverse=True)[:10]),
+            "response_time_percentiles": {
+                "p50": np.percentile(response_times, 50) if response_times else 0,
+                "p95": np.percentile(response_times, 95) if response_times else 0,
+                "p99": np.percentile(response_times, 99) if response_times else 0
+            }
+        })
     
-    logger.info(f"Returning top data: {len(result['labels'])} items")
-    return result
+    return metrics
+
+def format_bytes(bytes_num: int) -> str:
+    """Format bytes to human readable format"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if bytes_num < 1024.0:
+            return f"{bytes_num:.2f} {unit}"
+        bytes_num /= 1024.0
+    return f"{bytes_num:.2f} PB"
+
+@app.get("/api/geo-distribution")
+async def get_geo_distribution():
+    """Get geographic distribution data for map visualization"""
+    if not logs_data["geo_data"]:
+        return {"error": "No geographic data available. Upload logs first."}
+    
+    return logs_data["geo_data"]
+
+@app.get("/api/traffic-patterns")
+async def get_traffic_patterns():
+    """Get traffic pattern analysis"""
+    if not logs_data["hourly_patterns"]:
+        return {"error": "No traffic pattern data available. Upload logs first."}
+    
+    return logs_data["hourly_patterns"]
+
+@app.get("/api/endpoint-performance")
+async def get_endpoint_performance(limit: int = 20):
+    """Get endpoint performance metrics"""
+    if not logs_data["endpoint_stats"]:
+        return {"endpoints": {}, "total_endpoints": 0}
+    
+    endpoints = logs_data["endpoint_stats"]
+    sorted_endpoints = sorted(
+        endpoints.items(),
+        key=lambda x: x[1]["count"],
+        reverse=True
+    )[:limit]
+    
+    return {
+        "endpoints": dict(sorted_endpoints),
+        "total_endpoints": len(endpoints)
+    }
+
+@app.get("/api/status-analysis")
+async def get_status_analysis():
+    """Get detailed status code analysis"""
+    if not logs_data["status_analysis"]:
+        return {"error": "No status analysis data available. Upload logs first."}
+    
+    return logs_data["status_analysis"]
 
 @app.get("/api/timeline")
 async def get_timeline(
     interval: str = "hour",
-    time_range: str = "24h"
+    time_range: str = "24h",
+    metric: str = "requests"
 ):
-    """Get timeline data for charts - FIXED VERSION FOR OLD LOGS"""
-    logger.info(f"Getting timeline data, interval: {interval}, time_range: {time_range}")
-    
+    """Get timeline data for charts with multiple metrics"""
     if not logs_data["parsed_logs"]:
-        logger.info("No parsed logs found, returning empty")
-        return {"timestamps": [], "request_counts": []}
+        return {"timestamps": [], "values": [], "metric": metric}
     
-    # For old logs, we need to handle special case
-    if time_range == "all":
-        # Show all data without time filtering
-        filtered_logs = logs_data["parsed_logs"]
-        logger.info(f"Using ALL logs: {len(filtered_logs)}")
-    else:
-        # Calculate time window based on time_range
+    logs = logs_data["parsed_logs"]
+    
+    # Filter by time range
+    if time_range != "all":
         now = datetime.now(timezone.utc)
-        start_time = None
-        
         if time_range == "1h":
             start_time = now - timedelta(hours=1)
         elif time_range == "6h":
@@ -461,30 +724,23 @@ async def get_timeline(
         elif time_range == "30d":
             start_time = now - timedelta(days=30)
         else:
-            # Default to all logs
-            start_time = None
-            filtered_logs = logs_data["parsed_logs"]
+            start_time = now - timedelta(hours=24)
         
-        # Filter logs by time if start_time is specified
-        if start_time:
-            filtered_logs = []
-            for log in logs_data["parsed_logs"]:
-                if hasattr(log, 'timestamp'):
-                    # Check if log timestamp is within range
-                    if log.timestamp >= start_time:
-                        filtered_logs.append(log)
-        else:
-            filtered_logs = logs_data["parsed_logs"]
+        logs = [log for log in logs if hasattr(log, 'timestamp') and log.timestamp >= start_time]
     
-    logger.info(f"Filtered logs for timeline: {len(filtered_logs)} out of {len(logs_data['parsed_logs'])}")
-    
-    if not filtered_logs:
-        return {"timestamps": [], "request_counts": []}
+    if not logs:
+        return {"timestamps": [], "values": [], "metric": metric}
     
     # Group by time interval
-    timeline = {}
+    timeline = defaultdict(lambda: {
+        "requests": 0,
+        "errors": 0,
+        "bytes": 0,
+        "response_time": 0,
+        "count": 0
+    })
     
-    for log in filtered_logs:
+    for log in logs:
         if hasattr(log, 'timestamp'):
             if interval == "minute":
                 key = log.timestamp.strftime("%Y-%m-%d %H:%M")
@@ -493,7 +749,6 @@ async def get_timeline(
             elif interval == "day":
                 key = log.timestamp.strftime("%Y-%m-%d")
             elif interval == "week":
-                # Get week number
                 week_num = log.timestamp.isocalendar()[1]
                 key = f"{log.timestamp.year}-W{week_num:02d}"
             elif interval == "month":
@@ -501,551 +756,423 @@ async def get_timeline(
             else:
                 key = log.timestamp.strftime("%Y-%m-%d %H:%M")
             
-            timeline[key] = timeline.get(key, 0) + 1
+            data = timeline[key]
+            data["requests"] += 1
+            
+            if hasattr(log, 'status'):
+                try:
+                    status = int(log.status)
+                    if 400 <= status < 600:
+                        data["errors"] += 1
+                except:
+                    pass
+            
+            if hasattr(log, 'bytes_sent') and log.bytes_sent:
+                try:
+                    data["bytes"] += int(log.bytes_sent)
+                except:
+                    pass
+            
+            if hasattr(log, 'request_time'):
+                try:
+                    data["response_time"] += float(log.request_time)
+                    data["count"] += 1
+                except:
+                    pass
     
-    # Sort by time
+    # Calculate averages and prepare response
     sorted_timeline = sorted(timeline.items(), key=lambda x: x[0])
     
-    result = {
-        "timestamps": [item[0] for item in sorted_timeline],
-        "request_counts": [item[1] for item in sorted_timeline]
-    }
+    timestamps = []
+    values = []
     
-    logger.info(f"Returning timeline data: {len(result['timestamps'])} time points")
-    return result
+    for key, data in sorted_timeline:
+        timestamps.append(key)
+        
+        if metric == "requests":
+            values.append(data["requests"])
+        elif metric == "errors":
+            values.append(data["errors"])
+        elif metric == "bytes":
+            values.append(data["bytes"] / 1024)  # Convert to KB
+        elif metric == "error_rate":
+            rate = (data["errors"] / data["requests"]) * 100 if data["requests"] > 0 else 0
+            values.append(rate)
+        elif metric == "response_time":
+            avg_time = data["response_time"] / data["count"] if data["count"] > 0 else 0
+            values.append(avg_time * 1000)  # Convert to milliseconds
+        else:
+            values.append(data["requests"])
+    
+    return {
+        "timestamps": timestamps,
+        "values": values,
+        "metric": metric,
+        "unit": get_metric_unit(metric)
+    }
 
+def get_metric_unit(metric: str) -> str:
+    """Get unit for metric"""
+    units = {
+        "requests": "Requests",
+        "errors": "Errors",
+        "bytes": "KB",
+        "error_rate": "%",
+        "response_time": "ms"
+    }
+    return units.get(metric, "Count")
 
-
-@app.get("/api/endpoint-analysis")
-async def get_endpoint_analysis(limit: int = 20):
-    """Get detailed endpoint analysis"""
+@app.get("/api/advanced-analytics")
+async def get_advanced_analytics():
+    """Get comprehensive advanced analytics"""
     if not logs_data["parsed_logs"]:
-        return {"endpoints": [], "methods_by_endpoint": {}, "status_by_endpoint": {}}
+        return {"error": "No data available. Upload logs first."}
     
     logs = logs_data["parsed_logs"]
     
-    # Analyze endpoints
-    endpoint_stats = {}
-    method_distribution = {}
-    status_distribution = {}
+    # Calculate various analytics
+    analytics = {
+        "performance": calculate_performance_metrics(logs),
+        "security": calculate_security_metrics(),
+        "traffic": calculate_traffic_metrics(logs),
+        "users": calculate_user_metrics(logs),
+        "content": calculate_content_metrics(logs)
+    }
+    
+    return analytics
+
+def calculate_performance_metrics(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Calculate performance metrics"""
+    response_times = []
+    bytes_transferred = []
+    
+    for log in logs:
+        if hasattr(log, 'request_time'):
+            try:
+                response_times.append(float(log.request_time))
+            except:
+                pass
+        
+        if hasattr(log, 'bytes_sent') and log.bytes_sent:
+            try:
+                bytes_transferred.append(int(log.bytes_sent))
+            except:
+                pass
+    
+    return {
+        "avg_response_time": np.mean(response_times) if response_times else 0,
+        "p95_response_time": np.percentile(response_times, 95) if response_times else 0,
+        "p99_response_time": np.percentile(response_times, 99) if response_times else 0,
+        "throughput": len(logs) / 3600,  # requests per hour
+        "bandwidth": sum(bytes_transferred) / 1024 / 1024,  # MB
+        "avg_payload_size": np.mean(bytes_transferred) if bytes_transferred else 0
+    }
+
+def calculate_security_metrics() -> Dict[str, Any]:
+    """Calculate security metrics"""
+    alerts = logs_data["alerts"]
+    
+    alert_counts = defaultdict(int)
+    for alert in alerts:
+        alert_counts[alert.attack_type.value] += 1
+    
+    return {
+        "total_alerts": len(alerts),
+        "alert_distribution": dict(alert_counts),
+        "high_risk_ips": count_high_risk_ips(),
+        "attack_trend": analyze_attack_trends(alerts)
+    }
+
+def count_high_risk_ips() -> List[Dict[str, Any]]:
+    """Count high-risk IPs based on alerts"""
+    ip_alerts = defaultdict(list)
+    
+    for alert in logs_data["alerts"]:
+        ip_alerts[alert.client_ip].append(alert)
+    
+    high_risk = []
+    for ip, alerts in ip_alerts.items():
+        if len(alerts) >= 5:  # IPs with 5+ alerts
+            alert_types = Counter([alert.attack_type.value for alert in alerts])
+            high_risk.append({
+                "ip": ip,
+                "alert_count": len(alerts),
+                "alert_types": dict(alert_types),
+                "confidence_avg": np.mean([alert.confidence for alert in alerts])
+            })
+    
+    return sorted(high_risk, key=lambda x: x["alert_count"], reverse=True)[:10]
+
+def analyze_attack_trends(alerts: List[AttackAlert]) -> Dict[str, Any]:
+    """Analyze attack trends over time"""
+    alerts_by_hour = defaultdict(int)
+    alerts_by_day = defaultdict(int)
+    
+    for alert in alerts:
+        hour = alert.timestamp.strftime("%H:00")
+        day = alert.timestamp.strftime("%Y-%m-%d")
+        
+        alerts_by_hour[hour] += 1
+        alerts_by_day[day] += 1
+    
+    return {
+        "by_hour": dict(alerts_by_hour),
+        "by_day": dict(alerts_by_day),
+        "peak_hour": max(alerts_by_hour, key=alerts_by_hour.get) if alerts_by_hour else None,
+        "peak_day": max(alerts_by_day, key=alerts_by_day.get) if alerts_by_day else None
+    }
+
+def calculate_traffic_metrics(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Calculate traffic metrics"""
+    hourly_traffic = defaultdict(int)
+    daily_traffic = defaultdict(int)
+    
+    for log in logs:
+        if hasattr(log, 'timestamp'):
+            hour = log.timestamp.strftime("%H:00")
+            day = log.timestamp.strftime("%Y-%m-%d")
+            
+            hourly_traffic[hour] += 1
+            daily_traffic[day] += 1
+    
+    return {
+        "hourly_distribution": dict(hourly_traffic),
+        "daily_distribution": dict(daily_traffic),
+        "peak_hour": max(hourly_traffic, key=hourly_traffic.get) if hourly_traffic else None,
+        "peak_day": max(daily_traffic, key=daily_traffic.get) if daily_traffic else None,
+        "avg_daily_requests": np.mean(list(daily_traffic.values())) if daily_traffic else 0
+    }
+
+def calculate_user_metrics(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Calculate user metrics"""
+    user_agents = defaultdict(int)
+    ips = set()
+    countries = defaultdict(int)
+    
+    for log in logs:
+        if hasattr(log, 'user_agent') and log.user_agent:
+            user_agents[log.user_agent] += 1
+        
+        if hasattr(log, 'client_ip'):
+            ips.add(log.client_ip)
+            
+            # Get country from GeoIP
+            location = get_ip_location(log.client_ip)
+            if location and location.get("country"):
+                countries[location["country"]] += 1
+    
+    # Get top user agents
+    top_user_agents = dict(sorted(user_agents.items(), key=lambda x: x[1], reverse=True)[:10])
+    
+    return {
+        "unique_visitors": len(ips),
+        "top_user_agents": top_user_agents,
+        "bot_traffic": sum(count for ua, count in user_agents.items() if 'bot' in ua.lower()),
+        "country_distribution": dict(countries)
+    }
+
+def calculate_content_metrics(logs: List[LogEntry]) -> Dict[str, Any]:
+    """Calculate content metrics"""
+    content_types = defaultdict(int)
+    endpoints = defaultdict(int)
+    methods = defaultdict(int)
     
     for log in logs:
         if hasattr(log, 'endpoint'):
-            endpoint = log.endpoint
+            endpoints[log.endpoint] += 1
             
-            # Initialize endpoint stats
-            if endpoint not in endpoint_stats:
-                endpoint_stats[endpoint] = {
-                    "count": 0,
-                    "methods": {},
-                    "status_codes": {},
-                    "avg_bytes": 0,
-                    "total_bytes": 0
-                }
-            
-            stats = endpoint_stats[endpoint]
-            stats["count"] += 1
-            
-            # Track methods
-            if hasattr(log, 'method'):
-                method = log.method
-                if method not in stats["methods"]:
-                    stats["methods"][method] = 0
-                stats["methods"][method] += 1
-            
-            # Track status codes
-            if hasattr(log, 'status'):
-                status = str(log.status)
-                if status not in stats["status_codes"]:
-                    stats["status_codes"][status] = 0
-                stats["status_codes"][status] += 1
-            
-            # Track bytes
-            if hasattr(log, 'bytes_sent') and log.bytes_sent:
-                try:
-                    stats["total_bytes"] += int(log.bytes_sent)
-                except:
-                    pass
-    
-    # Calculate averages
-    for endpoint, stats in endpoint_stats.items():
-        if stats["count"] > 0:
-            stats["avg_bytes"] = stats["total_bytes"] / stats["count"]
-    
-    # Sort endpoints by request count
-    sorted_endpoints = sorted(
-        endpoint_stats.items(),
-        key=lambda x: x[1]["count"],
-        reverse=True
-    )[:limit]
-    
-    # Prepare response
-    result = {
-        "endpoints": [
-            {
-                "endpoint": endpoint,
-                "count": stats["count"],
-                "methods": stats["methods"],
-                "status_codes": stats["status_codes"],
-                "avg_bytes": stats["avg_bytes"],
-                "total_bytes": stats["total_bytes"]
-            }
-            for endpoint, stats in sorted_endpoints
-        ],
-        "total_endpoints": len(endpoint_stats),
-        "top_endpoints_count": len(sorted_endpoints)
-    }
-    
-    return result
-
-
-@app.get("/api/pattern-analysis")
-async def get_pattern_analysis():
-    """Analyze patterns in logs (hourly patterns, daily patterns, etc.)"""
-    if not logs_data["parsed_logs"]:
-        return {
-            "hourly_patterns": {},
-            "daily_patterns": {},
-            "status_patterns": {},
-            "method_patterns": {}
-        }
-    
-    logs = logs_data["parsed_logs"]
-    
-    # Hourly patterns
-    hourly_counts = {}
-    for hour in range(24):
-        hourly_counts[f"{hour:02d}:00"] = 0
-    
-    # Daily patterns
-    daily_counts = {
-        "Monday": 0, "Tuesday": 0, "Wednesday": 0,
-        "Thursday": 0, "Friday": 0, "Saturday": 0, "Sunday": 0
-    }
-    
-    # Status patterns by hour
-    status_by_hour = {}
-    
-    for log in logs:
-        if hasattr(log, 'timestamp'):
-            hour = log.timestamp.hour
-            hour_key = f"{hour:02d}:00"
-            weekday = log.timestamp.strftime("%A")
-            
-            # Hourly count
-            if hour_key in hourly_counts:
-                hourly_counts[hour_key] += 1
-            
-            # Daily count
-            if weekday in daily_counts:
-                daily_counts[weekday] += 1
-            
-            # Status by hour
-            if hasattr(log, 'status'):
-                status = str(log.status)
-                if hour_key not in status_by_hour:
-                    status_by_hour[hour_key] = {}
-                if status not in status_by_hour[hour_key]:
-                    status_by_hour[hour_key][status] = 0
-                status_by_hour[hour_key][status] += 1
-    
-    return {
-        "hourly_patterns": hourly_counts,
-        "daily_patterns": daily_counts,
-        "status_patterns": status_by_hour,
-        "total_logs": len(logs)
-    }
-
-
-@app.get("/api/status-analysis")
-async def get_status_analysis(detailed: bool = False):
-    """Get detailed status code analysis with trends"""
-    if not logs_data["parsed_logs"]:
-        return {"status_codes": {}, "trends": {}, "detailed": detailed}
-    
-    logs = logs_data["parsed_logs"]
-    
-    # Group by status code categories
-    status_data = {
-        "2xx": {"count": 0, "codes": {}},
-        "3xx": {"count": 0, "codes": {}},
-        "4xx": {"count": 0, "codes": {}},
-        "5xx": {"count": 0, "codes": {}}
-    }
-    
-    # Track status codes over time for trends
-    status_timeline = {}
-    
-    for log in logs:
-        if hasattr(log, 'status') and hasattr(log, 'timestamp'):
-            status = str(log.status)
-            status_category = status[0] + "xx"
-            
-            # Count by category
-            if status_category in status_data:
-                status_data[status_category]["count"] += 1
-            
-            # Count individual codes if detailed
-            if detailed:
-                if status not in status_data[status_category]["codes"]:
-                    status_data[status_category]["codes"][status] = 0
-                status_data[status_category]["codes"][status] += 1
-            
-            # Timeline data - by day
-            day_key = log.timestamp.strftime("%Y-%m-%d")
-            if day_key not in status_timeline:
-                status_timeline[day_key] = {
-                    "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0,
-                    "total": 0
-                }
-            
-            if status_category in status_timeline[day_key]:
-                status_timeline[day_key][status_category] += 1
-            status_timeline[day_key]["total"] += 1
-    
-    # Calculate percentages
-    total_requests = len(logs)
-    for category in status_data:
-        count = status_data[category]["count"]
-        status_data[category]["percentage"] = (count / total_requests * 100) if total_requests > 0 else 0
-    
-    return {
-        "status_codes": status_data,
-        "trends": status_timeline,
-        "detailed": detailed,
-        "total_requests": total_requests
-    }
-
-
-@app.get("/api/historical/metrics")
-async def get_historical_metrics():
-    """Get metrics aggregated by time periods"""
-    if not logs_data["parsed_logs"]:
-        return {"daily": [], "weekly": [], "monthly": []}
-    
-    logs = logs_data["parsed_logs"]
-    
-    # Aggregate by day
-    daily_data = {}
-    for log in logs:
-        if hasattr(log, 'timestamp'):
-            day_key = log.timestamp.strftime("%Y-%m-%d")
-            if day_key not in daily_data:
-                daily_data[day_key] = {
-                    "date": day_key,
-                    "requests": 0,
-                    "errors": 0,
-                    "unique_ips": set(),
-                    "bytes": 0
-                }
-            
-            daily = daily_data[day_key]
-            daily["requests"] += 1
-            
-            if hasattr(log, 'bytes_sent') and log.bytes_sent:
-                try:
-                    daily["bytes"] += int(log.bytes_sent)
-                except:
-                    pass
-            
-            if hasattr(log, 'client_ip') and log.client_ip:
-                daily["unique_ips"].add(log.client_ip)
-            
-            if hasattr(log, 'status'):
-                try:
-                    status = int(log.status)
-                    if 400 <= status < 600:
-                        daily["errors"] += 1
-                except:
-                    pass
-    
-    # Convert sets to counts
-    daily_result = []
-    for day_key, data in sorted(daily_data.items()):
-        daily_result.append({
-            "date": data["date"],
-            "requests": data["requests"],
-            "errors": data["errors"],
-            "unique_ips": len(data["unique_ips"]),
-            "bytes": data["bytes"],
-            "error_rate": data["errors"] / data["requests"] if data["requests"] > 0 else 0
-        })
-    
-    return {
-        "daily": daily_result[-30:],  # Last 30 days
-        "weekly": aggregate_by_week(daily_result),
-        "monthly": aggregate_by_month(daily_result)
-    }
-
-def aggregate_by_week(daily_data):
-    """Aggregate daily data by week"""
-    weekly_data = {}
-    for day in daily_data:
-        date_obj = datetime.strptime(day["date"], "%Y-%m-%d")
-        year, week, _ = date_obj.isocalendar()
-        week_key = f"{year}-W{week:02d}"
-        
-        if week_key not in weekly_data:
-            weekly_data[week_key] = {
-                "week": week_key,
-                "requests": 0,
-                "errors": 0,
-                "unique_ips": 0,
-                "bytes": 0
-            }
-        
-        weekly = weekly_data[week_key]
-        weekly["requests"] += day["requests"]
-        weekly["errors"] += day["errors"]
-        weekly["unique_ips"] += day["unique_ips"]
-        weekly["bytes"] += day["bytes"]
-    
-    result = []
-    for week_key, data in sorted(weekly_data.items()):
-        result.append({
-            "week": data["week"],
-            "requests": data["requests"],
-            "errors": data["errors"],
-            "unique_ips": data["unique_ips"],
-            "bytes": data["bytes"],
-            "error_rate": data["errors"] / data["requests"] if data["requests"] > 0 else 0
-        })
-    
-    return result
-
-def aggregate_by_month(daily_data):
-    """Aggregate daily data by month"""
-    monthly_data = {}
-    for day in daily_data:
-        date_obj = datetime.strptime(day["date"], "%Y-%m-%d")
-        month_key = date_obj.strftime("%Y-%m")
-        
-        if month_key not in monthly_data:
-            monthly_data[month_key] = {
-                "month": month_key,
-                "requests": 0,
-                "errors": 0,
-                "unique_ips": 0,
-                "bytes": 0
-            }
-        
-        monthly = monthly_data[month_key]
-        monthly["requests"] += day["requests"]
-        monthly["errors"] += day["errors"]
-        monthly["unique_ips"] += day["unique_ips"]
-        monthly["bytes"] += day["bytes"]
-    
-    result = []
-    for month_key, data in sorted(monthly_data.items()):
-        result.append({
-            "month": data["month"],
-            "requests": data["requests"],
-            "errors": data["errors"],
-            "unique_ips": data["unique_ips"],
-            "bytes": data["bytes"],
-            "error_rate": data["errors"] / data["requests"] if data["requests"] > 0 else 0
-        })
-    
-    return result
-
-@app.get("/api/compare/periods")
-async def compare_periods():
-    """Compare current period with previous period"""
-    if not logs_data["parsed_logs"]:
-        return {
-            "current": {},
-            "previous": {},
-            "changes": {}
-        }
-    
-    now = datetime.now(timezone.utc)
-    
-    # Current period (last 24 hours)
-    current_start = now - timedelta(hours=24)
-    # Previous period (24-48 hours ago)
-    previous_start = now - timedelta(hours=48)
-    previous_end = now - timedelta(hours=24)
-    
-    current_logs = []
-    previous_logs = []
-    
-    for log in logs_data["parsed_logs"]:
-        if hasattr(log, 'timestamp'):
-            if log.timestamp >= current_start:
-                current_logs.append(log)
-            elif previous_end <= log.timestamp < previous_start:
-                previous_logs.append(log)
-    
-    def calculate_period_metrics(logs):
-        if not logs:
-            return {
-                "requests": 0,
-                "unique_ips": 0,
-                "bytes": 0,
-                "errors": 0,
-                "error_rate": 0
-            }
-        
-        total_requests = len(logs)
-        unique_ips = len(set([log.client_ip for log in logs if hasattr(log, 'client_ip')]))
-        
-        total_bytes = 0
-        for log in logs:
-            if hasattr(log, 'bytes_sent') and log.bytes_sent:
-                try:
-                    total_bytes += int(log.bytes_sent)
-                except:
-                    pass
-        
-        errors = 0
-        for log in logs:
-            if hasattr(log, 'status'):
-                try:
-                    status = int(log.status)
-                    if 400 <= status < 600:
-                        errors += 1
-                except:
-                    pass
-        
-        error_rate = errors / total_requests if total_requests > 0 else 0
-        
-        return {
-            "requests": total_requests,
-            "unique_ips": unique_ips,
-            "bytes": total_bytes,
-            "errors": errors,
-            "error_rate": error_rate
-        }
-    
-    current_metrics = calculate_period_metrics(current_logs)
-    previous_metrics = calculate_period_metrics(previous_logs)
-    
-    # Calculate changes
-    changes = {}
-    for key in current_metrics:
-        if key in previous_metrics and previous_metrics[key] > 0:
-            if key == "error_rate":
-                changes[key] = current_metrics[key] - previous_metrics[key]
+            # Guess content type from endpoint
+            if log.endpoint.endswith(('.css', '.js', '.png', '.jpg', '.gif', '.ico')):
+                ext = log.endpoint.split('.')[-1]
+                content_types[ext] += 1
+            elif '/api/' in log.endpoint:
+                content_types['api'] += 1
+            elif any(ext in log.endpoint for ext in ['.html', '.php', '.jsp']):
+                content_types['html'] += 1
             else:
-                changes[key] = ((current_metrics[key] - previous_metrics[key]) / previous_metrics[key]) * 100
-        else:
-            changes[key] = 0
+                content_types['other'] += 1
+        
+        if hasattr(log, 'method'):
+            methods[log.method] += 1
     
     return {
-        "current": current_metrics,
-        "previous": previous_metrics,
-        "changes": changes
+        "content_type_distribution": dict(content_types),
+        "top_endpoints": dict(sorted(endpoints.items(), key=lambda x: x[1], reverse=True)[:10]),
+        "method_distribution": dict(methods),
+        "api_vs_web": {
+            "api": content_types.get('api', 0),
+            "web": content_types.get('html', 0) + content_types.get('other', 0),
+            "static": sum(count for ext, count in content_types.items() if ext not in ['api', 'html', 'other'])
+        }
     }
 
-@app.get("/api/export")
-async def export_logs(format: str = "csv"):
-    """Export filtered logs to CSV or JSON"""
-    logs = logs_data["parsed_logs"]
+@app.get("/api/export-analytics")
+async def export_analytics(format: str = "csv"):
+    """Export comprehensive analytics data"""
+    if not logs_data["parsed_logs"]:
+        raise HTTPException(status_code=400, detail="No data to export")
     
-    if not logs:
-        raise HTTPException(status_code=400, detail="No logs to export")
+    # Prepare all analytics data
+    analytics = {
+        "basic_metrics": await get_metrics("all", True),
+        "traffic_patterns": await get_traffic_patterns(),
+        "geo_distribution": await get_geo_distribution(),
+        "endpoint_performance": await get_endpoint_performance(50),
+        "status_analysis": await get_status_analysis(),
+        "advanced_analytics": await get_advanced_analytics()
+    }
     
-    # Convert to list of dicts
-    log_dicts = []
-    for log in logs:
-        try:
-            d = log.dict()
-            log_dicts.append(d)
-        except:
-            continue
+    if format.lower() == "json":
+        return JSONResponse(content=analytics)
     
-    if format.lower() == "csv":
-        # Create CSV
-        df = pd.DataFrame(log_dicts)
-        csv_path = "/tmp/exported_logs.csv"
-        df.to_csv(csv_path, index=False)
-        return FileResponse(
-            csv_path, 
-            filename="nginx_logs_export.csv",
-            media_type="text/csv"
-        )
-    
-    elif format.lower() == "json":
-        # Create JSON
-        json_path = "/tmp/exported_logs.json"
-        with open(json_path, 'w') as f:
-            json.dump(log_dicts, f, indent=2)
-        return FileResponse(
-            json_path, 
-            filename="nginx_logs_export.json",
-            media_type="application/json"
-        )
+    elif format.lower() == "csv":
+        # Create CSV file with multiple sheets
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write basic metrics
+        writer.writerow(["Basic Metrics"])
+        writer.writerow(["Metric", "Value"])
+        for key, value in analytics["basic_metrics"].items():
+            if isinstance(value, (int, float, str)):
+                writer.writerow([key, value])
+        
+        writer.writerow([])
+        writer.writerow(["Traffic Patterns"])
+        # Add more CSV data...
+        
+        output.seek(0)
+        return JSONResponse(content={"csv_data": output.getvalue()})
     
     else:
-        raise HTTPException(status_code=400, detail="Unsupported format. Use 'csv' or 'json'.")
+        raise HTTPException(status_code=400, detail="Unsupported format")
 
-@app.websocket("/ws/logs")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket for real-time log streaming"""
+@app.get("/api/log-statistics")
+async def get_log_statistics():
+    """Get detailed statistics about parsed logs"""
+    if not logs_data["parsed_logs"]:
+        return {"error": "No logs available"}
+    
+    logs = logs_data["parsed_logs"]
+    
+    stats = {
+        "total_logs": len(logs),
+        "time_range": {},
+        "status_summary": {},
+        "method_summary": {},
+        "endpoint_summary": {},
+        "user_agent_summary": {},
+        "bytes_summary": {}
+    }
+    
+    # Time range
+    if logs:
+        timestamps = [log.timestamp for log in logs if hasattr(log, 'timestamp')]
+        if timestamps:
+            stats["time_range"] = {
+                "start": min(timestamps).isoformat(),
+                "end": max(timestamps).isoformat(),
+                "duration_days": (max(timestamps) - min(timestamps)).days
+            }
+    
+    # Status summary
+    status_counts = defaultdict(int)
+    for log in logs:
+        if hasattr(log, 'status'):
+            status_counts[str(log.status)] += 1
+    stats["status_summary"] = {
+        "total": len(status_counts),
+        "distribution": dict(status_counts),
+        "error_rate": sum(count for status, count in status_counts.items() 
+                         if status.startswith('4') or status.startswith('5')) / len(logs) * 100
+    }
+    
+    # Method summary
+    method_counts = defaultdict(int)
+    for log in logs:
+        if hasattr(log, 'method'):
+            method_counts[log.method] += 1
+    stats["method_summary"] = dict(method_counts)
+    
+    # Endpoint summary
+    endpoint_counts = defaultdict(int)
+    for log in logs:
+        if hasattr(log, 'endpoint'):
+            endpoint_counts[log.endpoint] += 1
+    
+    stats["endpoint_summary"] = {
+        "total": len(endpoint_counts),
+        "top_10": dict(sorted(endpoint_counts.items(), key=lambda x: x[1], reverse=True)[:10])
+    }
+    
+    # User agent summary
+    ua_counts = defaultdict(int)
+    for log in logs:
+        if hasattr(log, 'user_agent') and log.user_agent:
+            ua_counts[log.user_agent[:50]] += 1
+    
+    stats["user_agent_summary"] = {
+        "total": len(ua_counts),
+        "top_10": dict(sorted(ua_counts.items(), key=lambda x: x[1], reverse=True)[:10])
+    }
+    
+    # Bytes summary
+    bytes_list = []
+    for log in logs:
+        if hasattr(log, 'bytes_sent') and log.bytes_sent:
+            try:
+                bytes_list.append(int(log.bytes_sent))
+            except:
+                pass
+    
+    if bytes_list:
+        stats["bytes_summary"] = {
+            "total": sum(bytes_list),
+            "avg": np.mean(bytes_list),
+            "min": min(bytes_list),
+            "max": max(bytes_list),
+            "p95": np.percentile(bytes_list, 95)
+        }
+    
+    return stats
+
+@app.websocket("/ws/analytics")
+async def analytics_websocket(websocket: WebSocket):
+    """WebSocket for real-time analytics updates"""
     await manager.connect(websocket)
     try:
-        # Send initial data
-        await websocket.send_json({
-            "type": "connection_established",
-            "message": "Connected to ForenX-NGINX Sentinel",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "log_count": len(logs_data["parsed_logs"])
-        })
-        
         while True:
-            # Keep connection alive
-            await asyncio.sleep(30)
-            await websocket.send_json({
-                "type": "heartbeat", 
-                "time": datetime.now(timezone.utc).isoformat(),
-                "log_count": len(logs_data["parsed_logs"])
-            })
+            # Send analytics update every 10 seconds
+            await asyncio.sleep(10)
             
+            if logs_data["parsed_logs"]:
+                update = {
+                    "type": "analytics_update",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "metrics": await get_metrics("1h", False),
+                    "alerts_count": len(logs_data["alerts"]),
+                    "active_connections": len(manager.active_connections)
+                }
+                
+                await websocket.send_json(update)
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"Analytics WebSocket error: {e}")
         manager.disconnect(websocket)
 
-@app.get("/api/debug")
-async def debug_endpoint():
-    """Debug endpoint to check data"""
-    sample_log = None
-    if logs_data["parsed_logs"]:
-        sample_log = logs_data["parsed_logs"][0]
-        sample_log_dict = sample_log.dict() if hasattr(sample_log, 'dict') else str(sample_log)
-    else:
-        sample_log_dict = None
-    
-    sample_alert = None
-    if logs_data["alerts"]:
-        sample_alert = logs_data["alerts"][0]
-        sample_alert_dict = sample_alert.dict() if hasattr(sample_alert, 'dict') else str(sample_alert)
-    else:
-        sample_alert_dict = None
-    
-    return {
-        "parsed_logs_count": len(logs_data["parsed_logs"]),
-        "alerts_count": len(logs_data["alerts"]),
-        "sample_log": sample_log_dict,
-        "sample_alert": sample_alert_dict,
-        "metrics": logs_data.get("metrics", {}),
-        "file_hashes": logs_data.get("file_hashes", {})
-    }
-
 def update_metrics():
-    """Update global metrics"""
+    """Update basic metrics"""
     if logs_data["parsed_logs"]:
-        # Simple metrics calculation
         logs = logs_data["parsed_logs"]
+        
         total_requests = len(logs)
         
-        # Get unique IPs
         unique_ips = set()
         for log in logs:
             if hasattr(log, 'client_ip') and log.client_ip:
                 unique_ips.add(log.client_ip)
-        unique_ips_count = len(unique_ips)
         
         total_bytes = 0
         for log in logs:
@@ -1072,17 +1199,15 @@ def update_metrics():
         
         logs_data["metrics"] = {
             "total_requests": total_requests,
-            "unique_ips": unique_ips_count,
+            "unique_ips": len(unique_ips),
             "total_bytes": total_bytes,
             "status_4xx": status_4xx,
             "status_5xx": status_5xx,
-            "error_rate": error_rate
+            "error_rate": error_rate,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         logger.info(f"Updated metrics: {logs_data['metrics']}")
-
-# Create uploads directory
-os.makedirs("uploads", exist_ok=True)
 
 if __name__ == "__main__":
     uvicorn.run(
