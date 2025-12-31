@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.pro
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=False
+      - GEOIP_DB_PATH=/app/GeoLite2-City.mmdb
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://postgres:password@db:5432/forensics
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./geoip:/app/geoip
+    depends_on:
+      - redis
+      - db
+    networks:
+      - forensics-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.pro
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - forensics-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - forensics-network
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=forensics
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - forensics-network
+
+  nginx-proxy:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - forensics-network
+
+volumes:
+  redis-data:
+  postgres-data:
+
+networks:
+  forensics-network:
+    driver: bridge
