@@ -1,581 +1,598 @@
 /**
- * ForenX-NGINX Sentinel Dashboard
- * Main JavaScript for the forensic dashboard - ENHANCED VERSION
+ * ForenX-NGINX Sentinel Pro - Enhanced Dashboard
+ * Professional visualizations with Chart.js and advanced analytics
  */
 
-const API_BASE = '/api';  // Use relative path
+const API_BASE = '/api';
 let currentView = 'dashboard';
 let currentLogsPage = 1;
 let logsTotalPages = 1;
 let realtimeEnabled = false;
 let websocket = null;
 
-// Chart instances
-let timelineChart = null;
-let topIpsChart = null;
-let statusChart = null;
-let endpointsChart = null;
-let userAgentsChart = null;
-let methodsChart = null;
-let dailyChart = null;
-let weeklyChart = null;
-let monthlyChart = null;
-let errorTrendChart = null;
-let timelineViewChart = null;
-let statusDonutChart = null;
-let statusTrendChart = null;
-let statusBarChart = null;
-let endpointTrafficChart = null;
-let hourlyPatternChart = null;
-let dailyPatternChart = null;
+// Chart instances for professional visualization
+let charts = {
+    timeline: null,
+    geoMap: null,
+    statusDonut: null,
+    trafficHeatmap: null,
+    endpointPerformance: null,
+    bandwidthChart: null,
+    responseTimeChart: null,
+    userAgentChart: null,
+    attackTrendChart: null,
+    hourlyPattern: null,
+    dailyPattern: null
+};
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
+    initDashboard();
     setupEventListeners();
     loadDashboardData();
-    initializeCharts();
+    initializeProfessionalCharts();
 });
 
+function initDashboard() {
+    // Set up professional theme
+    document.body.classList.add('dashboard-pro');
+    
+    // Initialize tooltips
+    initTooltips();
+    
+    // Initialize real-time updates
+    initRealtimeUpdates();
+}
+
 function setupEventListeners() {
-    // File upload handling
-    const fileInput = document.getElementById('fileInput');
+    // File upload with drag and drop
     const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
     
-    fileInput.addEventListener('change', handleFileSelect);
+    if (dropZone) {
+        dropZone.addEventListener('dragover', handleDragOver);
+        dropZone.addEventListener('dragleave', handleDragLeave);
+        dropZone.addEventListener('drop', handleDrop);
+        dropZone.addEventListener('click', () => fileInput.click());
+    }
     
-    // Drag and drop
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = '#2563eb';
-        dropZone.style.background = 'rgba(37, 99, 235, 0.1)';
+    if (fileInput) {
+        fileInput.addEventListener('change', handleFileSelect);
+    }
+    
+    // View switchers
+    document.querySelectorAll('.view-switcher').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const view = this.dataset.view;
+            switchView(view);
+        });
     });
     
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.style.borderColor = '#e2e8f0';
-        dropZone.style.background = '#f8fafc';
+    // Filter controls
+    document.querySelectorAll('.filter-control').forEach(control => {
+        control.addEventListener('change', applyFilters);
     });
     
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = '#e2e8f0';
-        dropZone.style.background = '#f8fafc';
-        
-        if (e.dataTransfer.files.length) {
-            fileInput.files = e.dataTransfer.files;
-            handleFileSelect({ target: fileInput });
-        }
-    });
+    // Export buttons
+    document.getElementById('exportCsv')?.addEventListener('click', exportToCSV);
+    document.getElementById('exportJson')?.addEventListener('click', exportToJSON);
+    document.getElementById('exportPdf')?.addEventListener('click', exportToPDF);
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.add('dragover');
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.remove('dragover');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.remove('dragover');
+    
+    const files = e.dataTransfer.files;
+    if (files.length) {
+        document.getElementById('fileInput').files = files;
+        handleFileSelect({ target: document.getElementById('fileInput') });
+    }
 }
 
 function handleFileSelect(e) {
     const files = e.target.files;
     const fileList = document.getElementById('fileList');
     
+    if (!fileList) return;
+    
     fileList.innerHTML = '';
     
     if (files.length > 0) {
-        fileList.innerHTML = '<h6>Selected Files:</h6>';
+        const list = document.createElement('div');
+        list.className = 'file-list';
         
-        for (let file of files) {
-            const fileSize = (file.size / 1024).toFixed(2) + ' KB';
-            fileList.innerHTML += `
-                <div class="alert alert-light d-flex justify-content-between align-items-center mb-2">
-                    <div>
-                        <i class="fas fa-file-logs me-2"></i>
-                        ${file.name}
-                        <small class="text-muted ms-2">(${fileSize})</small>
-                    </div>
-                    <i class="fas fa-check text-success"></i>
-                </div>
+        Array.from(files).forEach(file => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.innerHTML = `
+                <i class="fas fa-file-alt"></i>
+                <span class="file-name">${file.name}</span>
+                <span class="file-size">${formatFileSize(file.size)}</span>
             `;
-        }
-    }
-}
-
-// View Navigation Functions
-function showDashboard() {
-    switchView('dashboard', 'Dashboard Overview', 'Real-time forensic analysis of NGINX logs');
-    loadDashboardData();
-}
-
-function showLogsView() {
-    switchView('logs', 'Raw Logs Explorer', 'Browse and search through parsed logs');
-    loadLogs();
-}
-
-function showAlertsView() {
-    switchView('alerts', 'Security Alerts', 'Detected attacks and suspicious activities');
-    loadAlerts();
-}
-
-function showAnalyticsView() {
-    switchView('analytics', 'Basic Analytics', 'Basic traffic analysis and patterns');
-    loadAnalytics();
-}
-
-function showHistoricalView() {
-    switchView('historical', 'Historical Analytics', 'Long-term trends and patterns analysis');
-    loadHistoricalMetrics();
-    loadPeriodComparison();
-}
-
-function showTimelineView() {
-    switchView('timeline', 'Timeline Forensics', 'Interactive timeline with attack markers');
-    loadTimelineViewData();
-}
-
-function showRealTimeView() {
-    switchView('realtime', 'Real-time Monitor', 'Live log streaming and monitoring');
-}
-
-function showEnhancedAnalytics() {
-    switchView('enhancedAnalytics', 'Enhanced Analytics', 'Advanced status code and endpoint analysis');
-    loadEnhancedAnalytics();
-}
-
-function showSettings() {
-    alert('Settings view - To be implemented in Phase 2');
-}
-
-function showHelp() {
-    alert('Help & Documentation - To be implemented in Phase 2');
-}
-
-function switchView(viewName, title, subtitle) {
-    // Hide all views
-    document.querySelectorAll('#mainContent > div').forEach(div => {
-        div.style.display = 'none';
-    });
-    
-    // Show selected view
-    const viewElement = document.getElementById(viewName + 'View');
-    if (viewElement) {
-        viewElement.style.display = 'block';
-    }
-    
-    // Update header
-    document.getElementById('viewTitle').textContent = title;
-    document.getElementById('viewSubtitle').textContent = subtitle;
-    
-    // Update sidebar active state
-    document.querySelectorAll('.sidebar-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    
-    // Activate the clicked sidebar item
-    const activeItem = Array.from(document.querySelectorAll('.sidebar-item')).find(item => 
-        item.textContent.includes(title.split(' ')[0])
-    );
-    if (activeItem) {
-        activeItem.classList.add('active');
-    }
-    
-    currentView = viewName;
-}
-
-// Enhanced Analytics Functions
-async function loadEnhancedAnalytics() {
-    try {
-        console.log('Loading enhanced analytics...');
-        
-        // Load status code analysis
-        await loadStatusAnalysis();
-        
-        // Load endpoint analysis
-        await loadEndpointAnalysis();
-        
-        // Load pattern analysis
-        await loadPatternAnalysis();
-        
-        // Load endpoint stats table
-        await loadEndpointStatsTable();
-        
-        showToast('Enhanced analytics loaded successfully', 'success');
-        
-    } catch (error) {
-        console.error('Error loading enhanced analytics:', error);
-        showToast('Error loading enhanced analytics', 'danger');
-    }
-}
-
-async function loadStatusAnalysis() {
-    try {
-        const response = await fetch(`${API_BASE}/status-analysis?detailed=true`);
-        if (!response.ok) throw new Error('Status analysis failed');
-        
-        const data = await response.json();
-        console.log('Status analysis data:', data);
-        
-        createStatusCodeDonutChart(data);
-        createStatusCodeTrendChart(data);
-        createStatusCodeBarChart(data);
-        
-    } catch (error) {
-        console.error('Error loading status analysis:', error);
-    }
-}
-
-async function loadEndpointAnalysis() {
-    try {
-        const response = await fetch(`${API_BASE}/endpoint-analysis?limit=15`);
-        if (!response.ok) throw new Error('Endpoint analysis failed');
-        
-        const data = await response.json();
-        console.log('Endpoint analysis data:', data);
-        
-        createEndpointTrafficChart(data);
-        
-    } catch (error) {
-        console.error('Error loading endpoint analysis:', error);
-    }
-}
-
-async function loadPatternAnalysis() {
-    try {
-        const response = await fetch(`${API_BASE}/pattern-analysis`);
-        if (!response.ok) throw new Error('Pattern analysis failed');
-        
-        const data = await response.json();
-        console.log('Pattern analysis data:', data);
-        
-        createHourlyPatternChart(data);
-        createDailyPatternChart(data);
-        
-    } catch (error) {
-        console.error('Error loading pattern analysis:', error);
-    }
-}
-
-async function loadEndpointStatsTable() {
-    try {
-        const response = await fetch(`${API_BASE}/endpoint-analysis?limit=20`);
-        if (!response.ok) throw new Error('Endpoint stats failed');
-        
-        const data = await response.json();
-        const tableBody = document.getElementById('endpointStatsTable');
-        
-        if (!tableBody) return;
-        
-        if (!data.endpoints || data.endpoints.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="6" class="text-center">No endpoint data available</td></tr>';
-            return;
-        }
-        
-        let html = '';
-        data.endpoints.forEach(endpoint => {
-            // Get top method
-            const methods = endpoint.methods || {};
-            const topMethod = Object.entries(methods)
-                .sort((a, b) => b[1] - a[1])[0] || ['N/A', 0];
-            
-            // Get top status code
-            const statusCodes = endpoint.status_codes || {};
-            const topStatus = Object.entries(statusCodes)
-                .sort((a, b) => b[1] - a[1])[0] || ['N/A', 0];
-            
-            html += `
-                <tr>
-                    <td><small>${truncateText(endpoint.endpoint, 40)}</small></td>
-                    <td><span class="badge bg-primary">${endpoint.count}</span></td>
-                    <td>
-                        <span class="badge method-${topMethod[0]}">
-                            ${topMethod[0]}: ${topMethod[1]}
-                        </span>
-                    </td>
-                    <td><span class="status-badge status-${topStatus[0][0]}xx">${topStatus[0]}</span></td>
-                    <td><small>${formatBytes(endpoint.avg_bytes)}</small></td>
-                    <td><small>${formatBytes(endpoint.total_bytes)}</small></td>
-                </tr>
-            `;
+            list.appendChild(item);
         });
         
-        tableBody.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading endpoint stats:', error);
-        const tableBody = document.getElementById('endpointStatsTable');
-        if (tableBody) {
-            tableBody.innerHTML = '<tr><td colspan="6" class="text-center">Error loading endpoint statistics</td></tr>';
-        }
+        fileList.appendChild(list);
     }
 }
 
-// Enhanced Chart Creation Functions
-function createStatusCodeDonutChart(data) {
-    const canvas = document.getElementById('statusDonutChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (statusDonutChart) {
-        statusDonutChart.destroy();
-    }
-    
-    const categories = ['2xx', '3xx', '4xx', '5xx'];
-    const counts = categories.map(cat => data.status_codes[cat]?.count || 0);
-    const percentages = categories.map(cat => data.status_codes[cat]?.percentage || 0);
-    
-    const colors = {
-        '2xx': '#10b981',
-        '3xx': '#f59e0b',
-        '4xx': '#ef4444',
-        '5xx': '#dc2626'
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Professional Chart Initialization
+function initializeProfessionalCharts() {
+    // Initialize with empty professional charts
+    const chartConfigs = {
+        timeline: {
+            type: 'line',
+            options: getProfessionalLineOptions('Request Timeline')
+        },
+        statusDonut: {
+            type: 'doughnut',
+            options: getProfessionalDonutOptions('Status Distribution')
+        },
+        trafficHeatmap: {
+            type: 'bar',
+            options: getProfessionalBarOptions('Traffic Heatmap')
+        },
+        endpointPerformance: {
+            type: 'horizontalBar',
+            options: getProfessionalHorizontalBarOptions('Endpoint Performance')
+        },
+        bandwidthChart: {
+            type: 'line',
+            options: getProfessionalLineOptions('Bandwidth Usage')
+        },
+        responseTimeChart: {
+            type: 'line',
+            options: getProfessionalLineOptions('Response Times')
+        }
     };
     
-    statusDonutChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: categories.map((cat, i) => `${cat} (${percentages[i].toFixed(1)}%)`),
-            datasets: [{
-                data: counts,
-                backgroundColor: categories.map(cat => colors[cat]),
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { 
-                    position: 'right',
-                    labels: {
-                        font: {
-                            size: 11
-                        }
-                    }
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const label = context.label || '';
-                            const value = context.raw || 0;
-                            const total = data.total_requests || 1;
-                            const percentage = ((value / total) * 100).toFixed(1);
-                            return `${label.split(' (')[0]}: ${value} (${percentage}%)`;
-                        }
-                    }
-                }
-            },
-            cutout: '60%'
+    // Initialize each chart
+    Object.keys(chartConfigs).forEach(chartId => {
+        const canvas = document.getElementById(chartId + 'Chart');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            const config = chartConfigs[chartId];
+            
+            charts[chartId] = new Chart(ctx, {
+                type: config.type,
+                data: { datasets: [] },
+                options: config.options
+            });
         }
     });
 }
 
-function createStatusCodeTrendChart(data) {
-    const canvas = document.getElementById('statusTrendChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (statusTrendChart) {
-        statusTrendChart.destroy();
-    }
-    
-    const trends = data.trends || {};
-    const dates = Object.keys(trends).sort();
-    
-    // Limit to last 14 days for better visibility
-    const recentDates = dates.slice(-14);
-    
-    const categories = ['2xx', '3xx', '4xx', '5xx'];
-    const colors = {
-        '2xx': '#10b981',
-        '3xx': '#f59e0b',
-        '4xx': '#ef4444',
-        '5xx': '#dc2626'
-    };
-    
-    const datasets = categories.map(category => ({
-        label: category,
-        data: recentDates.map(date => trends[date]?.[category] || 0),
-        borderColor: colors[category],
-        backgroundColor: colors[category] + '20',
-        fill: false,
-        tension: 0.4,
-        borderWidth: 2
-    }));
-    
-    statusTrendChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: recentDates,
-            datasets: datasets
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { 
-                    position: 'top',
-                    labels: {
-                        font: {
-                            size: 11
-                        }
-                    }
+// Professional Chart Options
+function getProfessionalLineOptions(title) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                display: true,
+                position: 'top',
+                labels: {
+                    font: { size: 12 },
+                    padding: 20
                 }
             },
-            scales: {
-                x: {
-                    grid: { display: false },
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45
-                    }
+            tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                titleFont: { size: 14 },
+                bodyFont: { size: 13 },
+                padding: 12,
+                cornerRadius: 6
+            }
+        },
+        scales: {
+            x: {
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
                 },
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Requests',
-                        font: {
-                            size: 12
-                        }
+                ticks: {
+                    font: { size: 11 }
+                }
+            },
+            y: {
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                },
+                ticks: {
+                    font: { size: 11 }
+                },
+                beginAtZero: true
+            }
+        }
+    };
+}
+
+function getProfessionalDonutOptions(title) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '60%',
+        plugins: {
+            legend: {
+                position: 'right',
+                labels: {
+                    font: { size: 12 },
+                    padding: 15
+                }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                callbacks: {
+                    label: function(context) {
+                        const label = context.label || '';
+                        const value = context.raw || 0;
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = Math.round((value / total) * 100);
+                        return `${label}: ${value} (${percentage}%)`;
                     }
                 }
             }
         }
-    });
+    };
 }
 
-function createStatusCodeBarChart(data) {
-    const canvas = document.getElementById('statusBarChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (statusBarChart) {
-        statusBarChart.destroy();
-    }
-    
-    const statusCodes = {};
-    Object.keys(data.status_codes || {}).forEach(category => {
-        if (data.status_codes[category]?.codes) {
-            Object.assign(statusCodes, data.status_codes[category].codes);
+function getProfessionalBarOptions(title) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+        scales: {
+            x: {
+                grid: {
+                    display: false
+                },
+                ticks: {
+                    font: { size: 11 }
+                }
+            },
+            y: {
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                },
+                ticks: {
+                    font: { size: 11 }
+                },
+                beginAtZero: true
+            }
         }
-    });
+    };
+}
+
+function getProfessionalHorizontalBarOptions(title) {
+    return {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+        scales: {
+            x: {
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                },
+                ticks: {
+                    font: { size: 11 }
+                },
+                beginAtZero: true
+            },
+            y: {
+                grid: {
+                    display: false
+                },
+                ticks: {
+                    font: { size: 11 }
+                }
+            }
+        }
+    };
+}
+
+// Advanced Data Loading Functions
+async function loadDashboardData() {
+    try {
+        showLoading('dashboard');
+        
+        // Load multiple metrics in parallel
+        const [
+            metrics,
+            timeline,
+            geoData,
+            statusData,
+            endpointData,
+            patterns
+        ] = await Promise.all([
+            fetchData('/api/metrics?detailed=true'),
+            fetchData('/api/timeline?interval=hour&time_range=24h'),
+            fetchData('/api/geo-distribution'),
+            fetchData('/api/status-analysis'),
+            fetchData('/api/endpoint-performance?limit=15'),
+            fetchData('/api/traffic-patterns')
+        ]);
+        
+        // Update all dashboard components
+        updateProfessionalStatsCards(metrics);
+        updateTimelineChart(timeline);
+        updateStatusDonutChart(statusData);
+        updateGeoVisualization(geoData);
+        updateEndpointPerformanceChart(endpointData);
+        updateTrafficPatterns(patterns);
+        updateAlertsTable();
+        updateAttackTrends();
+        
+        hideLoading('dashboard');
+        showToast('Dashboard loaded successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error loading dashboard:', error);
+        showToast('Error loading dashboard data', 'danger');
+        hideLoading('dashboard');
+    }
+}
+
+async function fetchData(endpoint) {
+    const response = await fetch(API_BASE + endpoint);
+    if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+    }
+    return response.json();
+}
+
+function updateProfessionalStatsCards(metrics) {
+    const statsContainer = document.getElementById('statsCards');
+    if (!statsContainer) return;
     
-    const sortedCodes = Object.entries(statusCodes)
+    const cards = [
+        {
+            title: 'Total Requests',
+            value: metrics.total_requests?.toLocaleString() || '0',
+            icon: 'fa-globe',
+            color: 'primary',
+            change: '+12%',
+            trend: 'up'
+        },
+        {
+            title: 'Unique IPs',
+            value: metrics.unique_ips?.toLocaleString() || '0',
+            icon: 'fa-users',
+            color: 'success',
+            change: '+5%',
+            trend: 'up'
+        },
+        {
+            title: 'Bandwidth',
+            value: metrics.formatted_bandwidth || '0 MB/s',
+            icon: 'fa-chart-line',
+            color: 'info',
+            change: '+18%',
+            trend: 'up'
+        },
+        {
+            title: 'Error Rate',
+            value: metrics.error_rate ? `${(metrics.error_rate * 100).toFixed(1)}%` : '0%',
+            icon: 'fa-exclamation-triangle',
+            color: metrics.error_rate > 0.1 ? 'danger' : 'warning',
+            change: metrics.error_rate > 0.1 ? '+8%' : '-2%',
+            trend: metrics.error_rate > 0.1 ? 'up' : 'down'
+        },
+        {
+            title: 'Avg Response',
+            value: metrics.avg_response_time ? `${(metrics.avg_response_time * 1000).toFixed(0)}ms` : '0ms',
+            icon: 'fa-tachometer-alt',
+            color: 'secondary',
+            change: '-15%',
+            trend: 'down'
+        },
+        {
+            title: 'Requests/sec',
+            value: metrics.requests_per_second?.toFixed(2) || '0',
+            icon: 'fa-bolt',
+            color: 'warning',
+            change: '+22%',
+            trend: 'up'
+        }
+    ];
+    
+    statsContainer.innerHTML = cards.map(card => `
+        <div class="col-xl-2 col-lg-4 col-md-6">
+            <div class="stat-card-pro ${card.color}">
+                <div class="stat-icon">
+                    <i class="fas ${card.icon}"></i>
+                </div>
+                <div class="stat-content">
+                    <h3>${card.value}</h3>
+                    <p>${card.title}</p>
+                    <div class="stat-trend ${card.trend}">
+                        <i class="fas fa-arrow-${card.trend}"></i>
+                        ${card.change}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function updateTimelineChart(data) {
+    if (!charts.timeline || !data.timestamps) return;
+    
+    const datasets = [{
+        label: 'Requests',
+        data: data.values || [],
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true
+    }];
+    
+    charts.timeline.data = {
+        labels: data.timestamps,
+        datasets: datasets
+    };
+    
+    charts.timeline.update();
+}
+
+function updateStatusDonutChart(data) {
+    if (!charts.statusDonut || !data.distribution) return;
+    
+    const labels = Object.keys(data.distribution);
+    const values = Object.values(data.distribution);
+    
+    // Professional color palette
+    const colors = [
+        '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+        '#3b82f6', '#ec4899', '#f97316', '#84cc16'
+    ];
+    
+    charts.statusDonut.data = {
+        labels: labels,
+        datasets: [{
+            data: values,
+            backgroundColor: colors.slice(0, labels.length),
+            borderWidth: 1,
+            borderColor: '#fff'
+        }]
+    };
+    
+    charts.statusDonut.update();
+}
+
+function updateGeoVisualization(data) {
+    // This would integrate with a map library like Leaflet or Google Maps
+    // For now, display a table with geographic data
+    const geoContainer = document.getElementById('geoData');
+    if (!geoContainer || !data.countries) return;
+    
+    const countries = Object.entries(data.countries)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10);
     
-    if (sortedCodes.length === 0) {
-        canvas.parentElement.innerHTML = '<div class="alert alert-light">No status code data available</div>';
-        return;
-    }
+    geoContainer.innerHTML = `
+        <div class="geo-table">
+            <h6>Top Countries by Requests</h6>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Country</th>
+                        <th>Requests</th>
+                        <th>% of Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${countries.map(([country, count]) => `
+                        <tr>
+                            <td>
+                                <i class="fas fa-globe-americas me-2"></i>
+                                ${country}
+                            </td>
+                            <td>${count.toLocaleString()}</td>
+                            <td>
+                                <div class="progress">
+                                    <div class="progress-bar" 
+                                         style="width: ${(count / data.total_requests * 100).toFixed(1)}%">
+                                        ${(count / data.total_requests * 100).toFixed(1)}%
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
     
-    statusBarChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: sortedCodes.map(item => item[0]),
-            datasets: [{
-                label: 'Requests',
-                data: sortedCodes.map(item => item[1]),
-                backgroundColor: sortedCodes.map(item => {
-                    const code = parseInt(item[0]);
-                    if (code >= 200 && code < 300) return '#10b981';
-                    if (code >= 300 && code < 400) return '#f59e0b';
-                    if (code >= 400 && code < 500) return '#ef4444';
-                    return '#dc2626';
-                }),
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: {
-                    grid: { display: false }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
-                }
-            }
-        }
-    });
+    // If coordinates data is available, initialize map
+    if (data.coordinates && data.coordinates.length > 0) {
+        initGeographicMap(data.coordinates);
+    }
 }
 
-function createEndpointTrafficChart(data) {
-    const canvas = document.getElementById('endpointTrafficChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (endpointTrafficChart) {
-        endpointTrafficChart.destroy();
-    }
-    
-    const endpoints = data.endpoints || [];
-    const topEndpoints = endpoints.slice(0, 10);
-    
-    if (topEndpoints.length === 0) {
-        canvas.parentElement.innerHTML = '<div class="alert alert-light">No endpoint data available</div>';
-        return;
-    }
-    
-    endpointTrafficChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: topEndpoints.map(ep => {
-                const endpoint = ep.endpoint;
-                return endpoint.length > 30 ? endpoint.substring(0, 27) + '...' : endpoint;
-            }),
-            datasets: [{
-                label: 'Requests',
-                data: topEndpoints.map(ep => ep.count),
-                backgroundColor: '#3b82f6',
-                borderWidth: 0
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        title: function(context) {
-                            return topEndpoints[context[0].dataIndex]?.endpoint || '';
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
-                }
-            }
-        }
-    });
+function initGeographicMap(coordinates) {
+    // Placeholder for map initialization
+    // In production, integrate with Leaflet/Mapbox/Google Maps
+    console.log('Initializing map with', coordinates.length, 'coordinates');
 }
 
-function createHourlyPatternChart(data) {
-    const canvas = document.getElementById('hourlyPatternChart');
-    if (!canvas) return;
+function updateEndpointPerformanceChart(data) {
+    if (!charts.endpointPerformance || !data.endpoints) return;
     
-    const ctx = canvas.getContext('2d');
+    const endpoints = Object.entries(data.endpoints)
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 10);
     
-    // Destroy existing chart
-    if (hourlyPatternChart) {
-        hourlyPatternChart.destroy();
-    }
+    const labels = endpoints.map(([endpoint]) => 
+        endpoint.length > 30 ? endpoint.substring(0, 27) + '...' : endpoint
+    );
+    const values = endpoints.map(([, stats]) => stats.count);
+    const responseTimes = endpoints.map(([, stats]) => 
+        stats.avg_response_time ? (stats.avg_response_time * 1000).toFixed(0) : 0
+    );
     
-    const hourly = data.hourly_patterns || {};
-    const hours = Object.keys(hourly).sort();
-    const counts = hours.map(hour => hourly[hour]);
+    charts.endpointPerformance.data = {
+        labels: labels,
+        datasets: [
+            {
+                label: 'Requests',
+                data: values,
+                backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                borderColor: '#3b82f6',
+                borderWidth: 1
+            },
+            {
+                label: 'Response Time (ms)',
+                data: responseTimes,
+                backgroundColor: 'rgba(239, 68, 68, 0.8)',
+                borderColor: '#ef4444',
+                borderWidth: 1
+            }
+        ]
+    };
     
-    hourlyPatternChart = new Chart(ctx, {
-        type: 'line',
-        data: {
+    charts.endpointPerformance.update();
+}
+
+function updateTrafficPatterns(data) {
+    if (!data.hourly_distribution) return;
+    
+    // Update hourly pattern chart
+    if (charts.hourlyPattern) {
+        const hours = Object.keys(data.hourly_distribution).sort();
+        const counts = hours.map(hour => data.hourly_distribution[hour]);
+        
+        charts.hourlyPattern.data = {
             labels: hours,
             datasets: [{
                 label: 'Requests per Hour',
@@ -583,1860 +600,377 @@ function createHourlyPatternChart(data) {
                 borderColor: '#8b5cf6',
                 backgroundColor: 'rgba(139, 92, 246, 0.1)',
                 borderWidth: 2,
-                fill: true,
-                tension: 0.4
+                tension: 0.4,
+                fill: true
             }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Hour of Day'
-                    },
-                    grid: { display: false }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Requests'
-                    }
-                }
-            }
-        }
-    });
-}
-
-function createDailyPatternChart(data) {
-    const canvas = document.getElementById('dailyPatternChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (dailyPatternChart) {
-        dailyPatternChart.destroy();
+        };
+        
+        charts.hourlyPattern.update();
     }
     
-    const daily = data.daily_patterns || {};
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const counts = days.map(day => daily[day] || 0);
-    
-    dailyPatternChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: days.map(d => d.substring(0, 3)),
+    // Update daily pattern chart
+    if (charts.dailyPattern && data.daily_distribution) {
+        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const counts = days.map(day => data.daily_distribution[day] || 0);
+        
+        charts.dailyPattern.data = {
+            labels: days,
             datasets: [{
                 label: 'Requests',
                 data: counts,
                 backgroundColor: days.map((_, i) => 
-                    i < 5 ? '#3b82f6' : '#8b5cf6' // Weekdays vs weekends
+                    i < 5 ? 'rgba(59, 130, 246, 0.8)' : 'rgba(139, 92, 246, 0.8)'
                 ),
-                borderWidth: 0
+                borderColor: days.map((_, i) => 
+                    i < 5 ? '#3b82f6' : '#8b5cf6'
+                ),
+                borderWidth: 1
             }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                x: {
-                    grid: { display: false }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Requests'
-                    }
-                }
-            }
+        };
+        
+        charts.dailyPattern.update();
+    }
+}
+
+function updateAlertsTable() {
+    // Load and display alerts in a professional table
+    fetchData('/api/alerts?limit=10').then(data => {
+        const table = document.getElementById('alertsTable');
+        if (!table) return;
+        
+        const alerts = data.alerts || [];
+        
+        if (alerts.length === 0) {
+            table.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-4">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        No security alerts detected
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        table.innerHTML = alerts.map(alert => `
+            <tr class="alert-row severity-${getSeverityLevel(alert.confidence)}">
+                <td>
+                    <span class="timestamp">${formatDateTime(alert.timestamp)}</span>
+                </td>
+                <td>
+                    <span class="alert-badge ${getAlertBadgeClass(alert.attack_type)}">
+                        ${alert.attack_type}
+                    </span>
+                </td>
+                <td>
+                    <span class="ip-address" title="${alert.client_ip}">
+                        <i class="fas fa-network-wired me-1"></i>
+                        ${truncateText(alert.client_ip, 15)}
+                    </span>
+                </td>
+                <td>
+                    <span class="endpoint" title="${alert.endpoint}">
+                        ${truncateText(alert.endpoint, 25)}
+                    </span>
+                </td>
+                <td>
+                    <div class="confidence-meter">
+                        <div class="confidence-fill" 
+                             style="width: ${alert.confidence * 100}%">
+                            ${Math.round(alert.confidence * 100)}%
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" 
+                            onclick="viewAlertDetails('${alert.id}')">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }).catch(error => {
+        console.error('Error loading alerts:', error);
+    });
+}
+
+function getSeverityLevel(confidence) {
+    if (confidence >= 0.8) return 'high';
+    if (confidence >= 0.5) return 'medium';
+    return 'low';
+}
+
+function getAlertBadgeClass(attackType) {
+    const typeMap = {
+        'SQL Injection': 'danger',
+        'XSS': 'warning',
+        'DoS': 'danger',
+        'Brute Force': 'danger',
+        'Path Traversal': 'warning'
+    };
+    return typeMap[attackType] || 'secondary';
+}
+
+function updateAttackTrends() {
+    // Load attack trends for visualization
+    fetchData('/api/advanced-analytics').then(data => {
+        if (!data.security || !charts.attackTrendChart) return;
+        
+        const trends = data.security.attack_trend;
+        if (trends && trends.by_hour) {
+            const hours = Object.keys(trends.by_hour).sort();
+            const counts = hours.map(hour => trends.by_hour[hour]);
+            
+            charts.attackTrendChart.data = {
+                labels: hours,
+                datasets: [{
+                    label: 'Attack Attempts',
+                    data: counts,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                }]
+            };
+            
+            charts.attackTrendChart.update();
         }
     });
 }
 
-// API Functions (Original - Keep These)
-async function loadDashboardData() {
+// Enhanced Analytics Functions
+async function loadAdvancedAnalytics() {
     try {
-        console.log('Loading dashboard data...');
+        showLoading('analytics');
         
-        // Load metrics
-        const metricsResponse = await fetch(`${API_BASE}/metrics?time_range=24h`);
-        if (!metricsResponse.ok) {
-            throw new Error(`Metrics API error: ${metricsResponse.status}`);
-        }
-        const metrics = await metricsResponse.json();
-        console.log('Metrics loaded:', metrics);
+        const analytics = await fetchData('/api/advanced-analytics');
         
-        updateStatsCards(metrics);
+        updatePerformanceMetrics(analytics.performance);
+        updateSecurityMetrics(analytics.security);
+        updateTrafficMetrics(analytics.traffic);
+        updateUserMetrics(analytics.users);
+        updateContentMetrics(analytics.content);
         
-        // Load timeline
-        await loadTimelineData();
-        
-        // Load top IPs
-        await loadTopIps();
-        
-        // Load status distribution
-        await loadStatusDistribution();
-        
-        // Load recent alerts
-        await loadRecentAlerts();
-        
-        // Load attack types
-        await loadAttackTypes();
+        hideLoading('analytics');
+        showToast('Advanced analytics loaded', 'success');
         
     } catch (error) {
-        console.error('Error loading dashboard data:', error);
-        showToast('Error loading dashboard data', 'danger');
-    }
-}
-
-async function loadTimelineData() {
-    try {
-        const range = document.getElementById('timelineRange')?.value || '24h';
-        const interval = document.getElementById('timelineInterval')?.value || 'hour';
-        
-        const response = await fetch(`${API_BASE}/timeline?interval=${interval}&time_range=${range}`);
-        if (!response.ok) {
-            throw new Error(`Timeline API error: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        console.log('Timeline data:', data);
-        
-        if (data.error) {
-            console.warn(data.error);
-            return;
-        }
-        
-        updateTimelineChart(data);
-        
-    } catch (error) {
-        console.error('Error loading timeline data:', error);
-    }
-}
-
-async function loadTopIps() {
-    try {
-        const response = await fetch(`${API_BASE}/top-data?category=ips&limit=10`);
-        if (!response.ok) {
-            throw new Error(`Top IPs API error: ${metricsResponse.status}`);
-        }
-        const data = await response.json();
-        
-        console.log('Top IPs data:', data);
-        
-        if (data.error) {
-            console.warn(data.error);
-            return;
-        }
-        
-        updateTopIpsChart(data);
-        
-    } catch (error) {
-        console.error('Error loading top IPs:', error);
-    }
-}
-
-async function loadStatusDistribution() {
-    try {
-        const response = await fetch(`${API_BASE}/top-data?category=status_codes`);
-        if (!response.ok) {
-            throw new Error(`Status API error: ${metricsResponse.status}`);
-        }
-        const data = await response.json();
-        
-        console.log('Status data:', data);
-        
-        if (data.error) {
-            console.warn(data.error);
-            return;
-        }
-        
-        updateStatusChart(data);
-        
-    } catch (error) {
-        console.error('Error loading status distribution:', error);
-    }
-}
-
-async function loadRecentAlerts() {
-    try {
-        const response = await fetch(`${API_BASE}/alerts?limit=5`);
-        if (!response.ok) {
-            throw new Error(`Alerts API error: ${metricsResponse.status}`);
-        }
-        const data = await response.json();
-        
-        console.log('Alerts data:', data);
-        
-        updateAlertsTable(data.alerts || []);
-        
-    } catch (error) {
-        console.error('Error loading alerts:', error);
-    }
-}
-
-async function loadAttackTypes() {
-    try {
-        const response = await fetch(`${API_BASE}/alerts?limit=100`);
-        if (!response.ok) {
-            throw new Error(`Attack types API error: ${metricsResponse.status}`);
-        }
-        const data = await response.json();
-        
-        const attackTypesDiv = document.getElementById('attackTypesList');
-        const alerts = data.alerts || [];
-        
-        if (alerts.length === 0) {
-            attackTypesDiv.innerHTML = `
-                <div class="alert alert-light">
-                    <small>Attack types will be displayed after log analysis</small>
-                </div>
-            `;
-            return;
-        }
-        
-        // Count attack types
-        const attackCounts = {};
-        alerts.forEach(alert => {
-            const type = alert.attack_type;
-            attackCounts[type] = (attackCounts[type] || 0) + 1;
-        });
-        
-        // Display attack types
-        let html = '';
-        for (const [type, count] of Object.entries(attackCounts)) {
-            let badgeClass = 'bg-secondary';
-            if (type.includes('SQL')) badgeClass = 'bg-danger';
-            else if (type.includes('XSS')) badgeClass = 'bg-warning';
-            else if (type.includes('DoS')) badgeClass = 'bg-danger';
-            else if (type.includes('Brute')) badgeClass = 'bg-danger';
-            
-            html += `
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="badge ${badgeClass} me-2">${type}</span>
-                    <small class="text-muted">${count} alerts</small>
-                </div>
-            `;
-        }
-        
-        attackTypesDiv.innerHTML = html;
-        
-    } catch (error) {
-        console.error('Error loading attack types:', error);
-        const attackTypesDiv = document.getElementById('attackTypesList');
-        attackTypesDiv.innerHTML = `
-            <div class="alert alert-light">
-                <small>Error loading attack types</small>
-            </div>
-        `;
-    }
-}
-
-async function loadLogs() {
-    try {
-        const response = await fetch(`${API_BASE}/logs?page=${currentLogsPage}&limit=100`);
-        if (!response.ok) {
-            throw new Error(`Logs API error: ${metricsResponse.status}`);
-        }
-        const data = await response.json();
-        
-        console.log('Logs data received:', data.logs?.length || 0, 'logs');
-        
-        updateLogsTable(data.logs || []);
-        
-        logsTotalPages = data.pagination?.pages || 1;
-        document.getElementById('logsPageInfo').textContent = 
-            `Page ${currentLogsPage} of ${logsTotalPages}`;
-        document.getElementById('logsCount').textContent = 
-            `Showing ${data.logs?.length || 0} logs`;
-        
-    } catch (error) {
-        console.error('Error loading logs:', error);
-        showToast('Error loading logs', 'danger');
-    }
-}
-
-async function loadAnalytics() {
-    try {
-        console.log('Loading analytics data...');
-        
-        // Load endpoints
-        const endpointsResponse = await fetch(`${API_BASE}/top-data?category=endpoints&limit=10`);
-        if (endpointsResponse.ok) {
-            const endpointsData = await endpointsResponse.json();
-            console.log('Endpoints data:', endpointsData);
-            if (!endpointsData.error) {
-                updateEndpointsChart(endpointsData);
-            }
-        }
-        
-        // Load user agents
-        const uaResponse = await fetch(`${API_BASE}/top-data?category=user_agents&limit=8`);
-        if (uaResponse.ok) {
-            const uaData = await uaResponse.json();
-            console.log('User agents data:', uaData);
-            if (!uaData.error) {
-                updateUserAgentsChart(uaData);
-            }
-        }
-        
-        // Load methods from logs
-        await loadMethodsFromLogs();
-        
-    } catch (error) {
-        console.error('Error loading analytics:', error);
+        console.error('Error loading advanced analytics:', error);
         showToast('Error loading analytics', 'danger');
+        hideLoading('analytics');
     }
 }
 
-async function loadMethodsFromLogs() {
-    try {
-        const response = await fetch(`${API_BASE}/logs?limit=1000`);
-        if (!response.ok) return;
-        
-        const data = await response.json();
-        const logs = data.logs || [];
-        
-        const methodCounts = {};
-        logs.forEach(log => {
-            if (log.method) {
-                methodCounts[log.method] = (methodCounts[log.method] || 0) + 1;
-            }
-        });
-        
-        if (Object.keys(methodCounts).length > 0) {
-            updateMethodsChart(methodCounts);
-        }
-        
-    } catch (error) {
-        console.error('Error loading methods:', error);
-    }
-}
-
-async function loadHistoricalMetrics() {
-    try {
-        const response = await fetch(`${API_BASE}/historical/metrics`);
-        if (response.ok) {
-            const data = await response.json();
-            updateHistoricalCharts(data);
-            changeErrorTrend('daily'); // Initialize error trend chart
-        }
-    } catch (error) {
-        console.error('Error loading historical metrics:', error);
-    }
-}
-
-async function loadPeriodComparison() {
-    try {
-        const response = await fetch(`${API_BASE}/compare/periods`);
-        if (response.ok) {
-            const data = await response.json();
-            updateComparisonChart(data);
-        }
-    } catch (error) {
-        console.error('Error loading period comparison:', error);
-    }
-}
-
-async function loadTimelineViewData() {
-    try {
-        const mode = document.getElementById('timelineMode')?.value || 'requests';
-        const range = document.getElementById('timelineViewRange')?.value || '7d';
-        
-        // Get timeline data
-        const response = await fetch(`${API_BASE}/timeline?interval=day&time_range=${range}`);
-        if (!response.ok) return;
-        
-        const data = await response.json();
-        createTimelineViewChart(data, mode);
-        
-    } catch (error) {
-        console.error('Error loading timeline view data:', error);
-    }
-}
-
-// UI Update Functions
-function updateStatsCards(metrics) {
-    const statsRow = document.getElementById('statsRow');
+function updatePerformanceMetrics(metrics) {
+    const container = document.getElementById('performanceMetrics');
+    if (!container || !metrics) return;
     
-    if (!statsRow) {
-        console.error('Stats row element not found');
-        return;
-    }
-    
-    console.log('Updating stats with:', metrics);
-    
-    // Ensure we have valid numbers
-    const totalRequests = metrics.total_requests || 0;
-    const uniqueIps = metrics.unique_ips || 0;
-    const totalBytes = metrics.total_bytes || 0;
-    const status4xx = metrics.status_4xx || 0;
-    const status5xx = metrics.status_5xx || 0;
-    const errorRate = metrics.error_rate || 0;
-    
-    statsRow.innerHTML = `
-        <div class="col-xl-2 col-lg-4 col-md-6">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">${totalRequests.toLocaleString()}</h3>
-                        <p class="text-muted mb-0">Total Requests</p>
-                    </div>
-                    <div class="stat-icon" style="background: #dbeafe; color: #1d4ed8;">
-                        <i class="fas fa-globe"></i>
-                    </div>
+    container.innerHTML = `
+        <div class="row">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h6>Avg Response Time</h6>
+                    <h3>${(metrics.avg_response_time * 1000).toFixed(0)}ms</h3>
+                    <small>P95: ${(metrics.p95_response_time * 1000).toFixed(0)}ms</small>
                 </div>
             </div>
-        </div>
-        
-        <div class="col-xl-2 col-lg-4 col-md-6">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">${uniqueIps.toLocaleString()}</h3>
-                        <p class="text-muted mb-0">Unique IPs</p>
-                    </div>
-                    <div class="stat-icon" style="background: #fce7f3; color: #be185d;">
-                        <i class="fas fa-network-wired"></i>
-                    </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h6>Throughput</h6>
+                    <h3>${metrics.throughput.toFixed(1)}</h3>
+                    <small>requests per hour</small>
                 </div>
             </div>
-        </div>
-        
-        <div class="col-xl-2 col-lg-4 col-md-6">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">${formatBytes(totalBytes)}</h3>
-                        <p class="text-muted mb-0">Total Bytes</p>
-                    </div>
-                    <div class="stat-icon" style="background: #dcfce7; color: #166534;">
-                        <i class="fas fa-database"></i>
-                    </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h6>Bandwidth</h6>
+                    <h3>${(metrics.bandwidth).toFixed(1)}MB</h3>
+                    <small>total transferred</small>
                 </div>
             </div>
-        </div>
-        
-        <div class="col-xl-2 col-lg-4 col-md-6">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">${status4xx.toLocaleString()}</h3>
-                        <p class="text-muted mb-0">4xx Errors</p>
-                    </div>
-                    <div class="stat-icon" style="background: #fef3c7; color: #92400e;">
-                        <i class="fas fa-exclamation-triangle"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-xl-2 col-lg-4 col-md-6">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">${status5xx.toLocaleString()}</h3>
-                        <p class="text-muted mb-0">5xx Errors</p>
-                    </div>
-                    <div class="stat-icon" style="background: #fee2e2; color: #991b1b;">
-                        <i class="fas fa-bug"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-xl-2 col-lg-4 col-md-6">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">${(errorRate * 100).toFixed(1)}%</h3>
-                        <p class="text-muted mb-0">Error Rate</p>
-                    </div>
-                    <div class="stat-icon" style="background: #e0e7ff; color: #3730a3;">
-                        <i class="fas fa-percentage"></i>
-                    </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <h6>Avg Payload</h6>
+                    <h3>${formatBytes(metrics.avg_payload_size)}</h3>
+                    <small>per request</small>
                 </div>
             </div>
         </div>
     `;
 }
 
-function updateTimelineChart(data) {
-    const canvas = document.getElementById('timelineChart');
-    if (!canvas) {
-        console.error('Timeline chart canvas not found');
-        return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (timelineChart) {
-        timelineChart.destroy();
-    }
-    
-    // Ensure we have data
-    const timestamps = data.timestamps || [];
-    const requestCounts = data.request_counts || [];
-    
-    if (timestamps.length === 0 || requestCounts.length === 0) {
-        // Create empty chart with message
-        timelineChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    label: 'Requests',
-                    data: [0],
-                    borderColor: '#e2e8f0',
-                    backgroundColor: 'rgba(226, 232, 240, 0.1)',
-                    borderWidth: 1,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'No timeline data available'
-                    }
-                }
-            }
-        });
-        return;
-    }
-    
-    timelineChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: timestamps,
-            datasets: [{
-                label: 'Requests',
-                data: requestCounts,
-                borderColor: '#2563eb',
-                backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                x: {
-                    grid: {
-                        display: false
-                    },
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
-                }
-            }
-        }
-    });
-}
-
-function updateTopIpsChart(data) {
-    const canvas = document.getElementById('topIpsChart');
-    if (!canvas) {
-        console.error('Top IPs chart canvas not found');
-        return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (topIpsChart) {
-        topIpsChart.destroy();
-    }
-    
-    const labels = data.labels || [];
-    const values = data.values || [];
-    
-    if (labels.length === 0 || values.length === 0) {
-        // Create empty chart
-        topIpsChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    data: [0],
-                    backgroundColor: '#e2e8f0'
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'No IP data available'
-                    }
-                }
-            }
-        });
-        return;
-    }
-    
-    // Truncate IPs for display
-    const truncatedLabels = labels.map(ip => {
-        if (ip.length > 15) {
-            return ip.substring(0, 12) + '...';
-        }
-        return ip;
-    });
-    
-    topIpsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: truncatedLabels,
-            datasets: [{
-                data: values,
-                backgroundColor: [
-                    '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
-                    '#ec4899', '#f43f5e', '#ef4444', '#f97316', '#f59e0b'
-                ],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return `Requests: ${context.parsed.y}`;
-                        },
-                        afterLabel: function(context) {
-                            return `IP: ${labels[context.dataIndex]}`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
-    });
-}
-
-function updateStatusChart(data) {
-    const canvas = document.getElementById('statusChart');
-    if (!canvas) {
-        console.error('Status chart canvas not found');
-        return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (statusChart) {
-        statusChart.destroy();
-    }
-    
-    const labels = data.labels || [];
-    const values = data.values || [];
-    
-    if (labels.length === 0 || values.length === 0) {
-        // Create empty chart
-        statusChart = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    data: [1],
-                    backgroundColor: ['#e2e8f0']
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'No status data available'
-                    }
-                },
-                cutout: '70%'
-            }
-        });
-        return;
-    }
-    
-    // Color mapping for status codes
-    const statusColors = labels.map(status => {
-        if (status.startsWith('2')) return '#10b981';
-        if (status.startsWith('3')) return '#f59e0b';
-        if (status.startsWith('4')) return '#ef4444';
-        if (status.startsWith('5')) return '#dc2626';
-        return '#6b7280';
-    });
-    
-    statusChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: values,
-                backgroundColor: statusColors,
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                }
-            },
-            cutout: '70%'
-        }
-    });
-}
-
-function updateAlertsTable(alerts) {
-    const tableBody = document.getElementById('alertsTable');
-    if (!tableBody) {
-        console.error('Alerts table body not found');
-        return;
-    }
-    
-    console.log('Updating alerts table with:', alerts.length, 'alerts');
-    
-    if (alerts.length === 0) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center text-muted py-4">
-                    No security alerts detected yet
-                </td>
-            </tr>
-        `;
-        return;
-    }
-    
-    let html = '';
-    
-    alerts.forEach(alert => {
-        const time = new Date(alert.timestamp).toLocaleTimeString();
-        const confidencePercent = Math.round((alert.confidence || 0.5) * 100);
-        
-        // Determine severity color
-        let severityClass = 'warning';
-        if (confidencePercent > 80) severityClass = 'danger';
-        if (confidencePercent < 50) severityClass = 'info';
-        
-        html += `
-            <tr class="log-row alert-${severityClass}">
-                <td><small>${time}</small></td>
-                <td>
-                    <span class="badge bg-${severityClass}">
-                        ${alert.attack_type || 'Unknown'}
-                    </span>
-                </td>
-                <td><span class="ip-badge">${alert.client_ip || 'Unknown'}</span></td>
-                <td><small>${truncateText(alert.endpoint || '', 30)}</small></td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <div class="progress flex-grow-1 me-2" style="height: 6px;">
-                            <div class="progress-bar bg-${severityClass}" 
-                                 style="width: ${confidencePercent}%"></div>
-                        </div>
-                        <small>${confidencePercent}%</small>
-                    </div>
-                </td>
-            </tr>
-        `;
-    });
-    
-    tableBody.innerHTML = html;
-}
-
-function updateLogsTable(logs) {
-    const tableBody = document.getElementById('logsTable');
-    if (!tableBody) {
-        console.error('Logs table body not found');
-        return;
-    }
-    
-    console.log('Updating logs table with:', logs.length, 'logs');
-    
-    if (logs.length === 0) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="7" class="text-center text-muted py-4">
-                    No logs loaded. Upload log files to begin analysis.
-                </td>
-            </tr>
-        `;
-        return;
-    }
-    
-    let html = '';
-    
-    logs.forEach(log => {
-        const time = new Date(log.timestamp).toLocaleString();
-        const statusClass = `status-${Math.floor(log.status / 100)}xx`;
-        const bytes = log.bytes_sent ? formatBytes(log.bytes_sent) : '-';
-        const userAgent = truncateText(log.user_agent || '-', 40);
-        
-        html += `
-            <tr class="log-row">
-                <td><small>${time}</small></td>
-                <td><span class="ip-badge">${log.client_ip || 'Unknown'}</span></td>
-                <td><span class="badge bg-light text-dark">${log.method || 'GET'}</span></td>
-                <td><small>${truncateText(log.endpoint || '', 40)}</small></td>
-                <td><span class="${statusClass} fw-bold">${log.status || 0}</span></td>
-                <td><small>${bytes}</small></td>
-                <td><small title="${log.user_agent || ''}">${userAgent}</small></td>
-            </tr>
-        `;
-    });
-    
-    tableBody.innerHTML = html;
-}
-
-function updateEndpointsChart(data) {
-    const canvas = document.getElementById('endpointsChart');
-    if (!canvas) {
-        console.error('Endpoints chart canvas not found');
-        return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (endpointsChart) {
-        endpointsChart.destroy();
-    }
-    
-    const labels = data.labels || [];
-    const values = data.values || [];
-    
-    if (labels.length === 0 || values.length === 0) {
-        endpointsChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    label: 'Requests',
-                    data: [0],
-                    backgroundColor: '#e2e8f0'
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'No endpoint data available'
-                    }
-                }
-            }
-        });
-        return;
-    }
-    
-    // Truncate long endpoint names
-    const truncatedLabels = labels.map(endpoint => {
-        if (endpoint.length > 30) {
-            return endpoint.substring(0, 27) + '...';
-        }
-        return endpoint;
-    });
-    
-    endpointsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: truncatedLabels,
-            datasets: [{
-                label: 'Requests',
-                data: values,
-                backgroundColor: '#3b82f6'
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        title: function(context) {
-                            return labels[context[0].dataIndex];
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    beginAtZero: true
-                }
-            }
-        }
-    });
-}
-
-function updateUserAgentsChart(data) {
-    const canvas = document.getElementById('userAgentsChart');
-    if (!canvas) {
-        console.error('User agents chart canvas not found');
-        return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (userAgentsChart) {
-        userAgentsChart.destroy();
-    }
-    
-    const labels = data.labels || [];
-    const values = data.values || [];
-    
-    if (labels.length === 0 || values.length === 0) {
-        userAgentsChart = new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    data: [1],
-                    backgroundColor: ['#e2e8f0']
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'No user agent data available'
-                    }
-                }
-            }
-        });
-        return;
-    }
-    
-    userAgentsChart = new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: values,
-                backgroundColor: [
-                    '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
-                    '#ec4899', '#f43f5e', '#ef4444', '#f97316'
-                ]
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    position: 'right'
-                }
-            }
-        }
-    });
-}
-
-function updateMethodsChart(methodCounts) {
-    const canvas = document.getElementById('methodsChart');
-    if (!canvas) {
-        console.error('Methods chart canvas not found');
-        return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (methodsChart) {
-        methodsChart.destroy();
-    }
-    
-    const labels = Object.keys(methodCounts);
-    const values = Object.values(methodCounts);
-    
-    if (labels.length === 0) {
-        methodsChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    label: 'Requests',
-                    data: [0],
-                    backgroundColor: '#e2e8f0'
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'No method data available'
-                    }
-                }
-            }
-        });
-        return;
-    }
-    
-    // Color mapping for HTTP methods
-    const methodColors = {
-        'GET': '#3b82f6',
-        'POST': '#10b981',
-        'PUT': '#f59e0b',
-        'DELETE': '#ef4444',
-        'PATCH': '#8b5cf6',
-        'HEAD': '#6b7280',
-        'OPTIONS': '#6366f1'
-    };
-    
-    const backgroundColors = labels.map(method => methodColors[method] || '#9ca3af');
-    
-    methodsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Requests',
-                data: values,
-                backgroundColor: backgroundColors
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
-    });
-}
-
-// Historical Analytics Functions
-function updateHistoricalCharts(data) {
-    // Daily requests chart
-    if (data.daily && data.daily.length > 0) {
-        createDailyChart(data.daily);
-    }
-    
-    // Weekly trends chart
-    if (data.weekly && data.weekly.length > 0) {
-        createWeeklyChart(data.weekly);
-    }
-    
-    // Monthly summary chart
-    if (data.monthly && data.monthly.length > 0) {
-        createMonthlyChart(data.monthly);
-    }
-}
-
-function createDailyChart(dailyData) {
-    const canvas = document.getElementById('dailyChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Clear existing chart
-    if (dailyChart) {
-        dailyChart.destroy();
-    }
-    
-    const labels = dailyData.map(d => d.date.split('-').slice(1).join('-'));
-    const requests = dailyData.map(d => d.requests);
-    const errors = dailyData.map(d => d.errors);
-    const uniqueIps = dailyData.map(d => d.unique_ips);
-    
-    dailyChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Requests',
-                    data: requests,
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'Errors',
-                    data: errors,
-                    borderColor: '#ef4444',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'Unique IPs',
-                    data: uniqueIps,
-                    borderColor: '#10b981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    yAxisID: 'y1'
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
-            stacked: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Daily Traffic Overview (Last 30 Days)'
-                }
-            },
-            scales: {
-                x: {
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: {
-                        display: true,
-                        text: 'Requests & Errors'
-                    }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    title: {
-                        display: true,
-                        text: 'Unique IPs'
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                    },
-                }
-            }
-        }
-    });
-}
-
-function createWeeklyChart(weeklyData) {
-    const canvas = document.getElementById('weeklyChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Clear existing chart
-    if (weeklyChart) {
-        weeklyChart.destroy();
-    }
-    
-    const labels = weeklyData.map(w => `Week ${w.week.split('-W')[1]}`);
-    const requests = weeklyData.map(w => w.requests);
-    const errorRate = weeklyData.map(w => w.error_rate * 100);
-    
-    weeklyChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Requests',
-                    data: requests,
-                    backgroundColor: 'rgba(59, 130, 246, 0.8)',
-                    borderColor: '#3b82f6',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Error Rate %',
-                    data: errorRate,
-                    type: 'line',
-                    borderColor: '#ef4444',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    yAxisID: 'y1'
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Weekly Trends'
-                }
-            },
-            scales: {
-                x: {
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Requests'
-                    }
-                },
-                y1: {
-                    position: 'right',
-                    beginAtZero: true,
-                    max: 100,
-                    title: {
-                        display: true,
-                        text: 'Error Rate %'
-                    },
-                    grid: {
-                        drawOnChartArea: false
-                    }
-                }
-            }
-        }
-    });
-}
-
-function createMonthlyChart(monthlyData) {
-    const canvas = document.getElementById('monthlyChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Clear existing chart
-    if (monthlyChart) {
-        monthlyChart.destroy();
-    }
-    
-    const labels = monthlyData.map(m => {
-        const [year, month] = m.month.split('-');
-        return `${year}-${month}`;
-    });
-    
-    const requests = monthlyData.map(m => m.requests);
-    const uniqueIps = monthlyData.map(m => m.unique_ips);
-    
-    // Calculate average requests per IP
-    const avgPerIp = monthlyData.map(m => 
-        m.unique_ips > 0 ? (m.requests / m.unique_ips).toFixed(1) : 0
-    );
-    
-    monthlyChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Total Requests',
-                    data: requests,
-                    backgroundColor: 'rgba(139, 92, 246, 0.7)',
-                    borderColor: '#8b5cf6',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Unique IPs',
-                    data: uniqueIps,
-                    backgroundColor: 'rgba(16, 185, 129, 0.7)',
-                    borderColor: '#10b981',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Avg Requests per IP',
-                    data: avgPerIp,
-                    type: 'line',
-                    borderColor: '#f59e0b',
-                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                    borderWidth: 2,
-                    fill: true
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Monthly Summary'
-                }
-            },
-            scales: {
-                x: {
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Count'
-                    }
-                }
-            }
-        }
-    });
-}
-
-async function changeErrorTrend(period) {
-    try {
-        const response = await fetch(`${API_BASE}/historical/metrics`);
-        if (!response.ok) return;
-        
-        const data = await response.json();
-        let trendData = [];
-        
-        if (period === 'daily' && data.daily) {
-            trendData = data.daily.slice(-14); // Last 14 days
-        } else if (period === 'weekly' && data.weekly) {
-            trendData = data.weekly;
-        } else if (period === 'monthly' && data.monthly) {
-            trendData = data.monthly;
-        }
-        
-        if (trendData.length > 0) {
-            createErrorTrendChart(trendData, period);
-        }
-    } catch (error) {
-        console.error('Error loading error trend:', error);
-    }
-}
-
-function createErrorTrendChart(data, period) {
-    const canvas = document.getElementById('errorTrendChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Clear existing chart
-    if (errorTrendChart) {
-        errorTrendChart.destroy();
-    }
-    
-    const labels = data.map(d => {
-        if (period === 'daily') return d.date.split('-').slice(1).join('-');
-        if (period === 'weekly') return `Week ${d.week.split('-W')[1]}`;
-        if (period === 'monthly') return d.month.split('-')[1];
-        return '';
-    });
-    
-    const errorRates = data.map(d => d.error_rate * 100);
-    
-    errorTrendChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Error Rate %',
-                data: errorRates,
-                borderColor: '#ef4444',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 100,
-                    ticks: {
-                        callback: value => value + '%'
-                    }
-                }
-            }
-        }
-    });
-}
-
-function updateComparisonChart(data) {
-    const comparisonDiv = document.getElementById('periodComparison');
-    if (!comparisonDiv) return;
-    
-    if (!data.current || !data.previous) {
-        comparisonDiv.innerHTML = '<div class="alert alert-light">Not enough data for comparison</div>';
-        return;
-    }
-    
-    let html = '<div class="row g-3">';
-    
-    const metrics = ['requests', 'unique_ips', 'errors', 'error_rate'];
-    const metricNames = {
-        'requests': 'Requests',
-        'unique_ips': 'Unique IPs',
-        'errors': 'Errors',
-        'error_rate': 'Error Rate'
-    };
-    const metricIcons = {
-        'requests': 'fa-globe',
-        'unique_ips': 'fa-network-wired',
-        'errors': 'fa-exclamation-triangle',
-        'error_rate': 'fa-percentage'
-    };
-    
-    metrics.forEach(metric => {
-        const current = metric === 'error_rate' 
-            ? (data.current[metric] * 100).toFixed(1) + '%'
-            : data.current[metric].toLocaleString();
-        
-        const previous = metric === 'error_rate'
-            ? (data.previous[metric] * 100).toFixed(1) + '%'
-            : data.previous[metric].toLocaleString();
-        
-        const change = data.changes[metric];
-        const isPositive = metric === 'error_rate' ? change < 0 : change > 0;
-        const changeClass = isPositive ? 'comparison-positive' : 'comparison-negative';
-        const changeIcon = isPositive ? 'fa-arrow-up' : 'fa-arrow-down';
-        const changeText = Math.abs(change).toFixed(1);
-        
-        html += `
-        <div class="col-md-6 col-lg-3">
-            <div class="stat-card">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="text-muted mb-1">${metricNames[metric]}</h6>
-                        <h4 class="mb-0">${current}</h4>
-                        <small class="text-muted">Previous: ${previous}</small>
-                    </div>
-                    <div class="stat-icon" style="background: #e0f2fe; color: #0369a1;">
-                        <i class="fas ${metricIcons[metric]}"></i>
-                    </div>
-                </div>
-                <div class="mt-2">
-                    <small class="${changeClass} fw-bold">
-                        <i class="fas ${changeIcon} me-1"></i>
-                        ${metric === 'error_rate' ? changeText + ' pp' : changeText + '%'}
-                        ${metric === 'error_rate' ? (isPositive ? 'improvement' : 'increase') : (isPositive ? 'increase' : 'decrease')}
-                    </small>
-                </div>
+function updateSecurityMetrics(metrics) {
+    const container = document.getElementById('securityMetrics');
+    if (!container || !metrics) return;
+    
+    const highRiskIPs = metrics.high_risk_ips || [];
+    
+    container.innerHTML = `
+        <div class="security-summary">
+            <div class="alert-count">
+                <h3>${metrics.total_alerts || 0}</h3>
+                <p>Total Security Alerts</p>
             </div>
+            
+            ${highRiskIPs.length > 0 ? `
+                <div class="high-risk-ips">
+                    <h6>High Risk IPs</h6>
+                    <div class="ip-list">
+                        ${highRiskIPs.map(ip => `
+                            <div class="ip-item">
+                                <span class="ip-address">${ip.ip}</span>
+                                <span class="ip-alerts">${ip.alert_count} alerts</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
         </div>
-        `;
-    });
-    
-    html += '</div>';
-    comparisonDiv.innerHTML = html;
-}
-
-function createTimelineViewChart(data, mode) {
-    const canvas = document.getElementById('timelineViewChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Clear existing chart
-    if (timelineViewChart) {
-        timelineViewChart.destroy();
-    }
-    
-    const timestamps = data.timestamps || [];
-    const requestCounts = data.request_counts || [];
-    
-    if (timestamps.length === 0) {
-        timelineViewChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ['No data'],
-                datasets: [{
-                    label: 'Requests',
-                    data: [0],
-                    borderColor: '#e2e8f0',
-                    backgroundColor: 'rgba(226, 232, 240, 0.1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'No timeline data available'
-                    }
-                }
-            }
-        });
-        return;
-    }
-    
-    timelineViewChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: timestamps,
-            datasets: [{
-                label: 'Requests',
-                data: requestCounts,
-                borderColor: '#2563eb',
-                backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                borderWidth: 2,
-                fill: true
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Historical Timeline'
-                }
-            },
-            scales: {
-                x: {
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
-    });
+    `;
 }
 
 // Utility Functions
+function formatDateTime(timestamp) {
+    if (!timestamp) return 'N/A';
+    const date = new Date(timestamp);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength - 3) + '...';
+}
+
 function formatBytes(bytes) {
-    if (bytes === 0 || !bytes) return '0 B';
+    if (!bytes || bytes === 0) return '0 B';
     
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function truncateText(text, maxLength) {
-    if (!text) return '-';
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength - 3) + '...';
+function showLoading(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.classList.add('loading');
+    }
+}
+
+function hideLoading(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.classList.remove('loading');
+    }
 }
 
 function showToast(message, type = 'info') {
-    // Create toast element
+    // Create professional toast notification
     const toast = document.createElement('div');
-    toast.className = `toast align-items-center text-bg-${type} border-0`;
-    toast.setAttribute('role', 'alert');
-    
+    toast.className = `toast-pro toast-${type}`;
     toast.innerHTML = `
-        <div class="d-flex">
-            <div class="toast-body">
-                ${message}
-            </div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        <div class="toast-content">
+            <i class="fas fa-${getToastIcon(type)}"></i>
+            <span>${message}</span>
         </div>
+        <button class="toast-close" onclick="this.parentElement.remove()">
+            <i class="fas fa-times"></i>
+        </button>
     `;
     
-    // Add to container
-    let container = document.querySelector('.toast-container');
-    if (!container) {
-        const newContainer = document.createElement('div');
-        newContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
-        document.body.appendChild(newContainer);
-        container = newContainer;
-    }
-    
+    const container = document.getElementById('toastContainer') || createToastContainer();
     container.appendChild(toast);
     
-    // Show toast
-    const bsToast = new bootstrap.Toast(toast, { delay: 3000 });
-    bsToast.show();
-    
-    // Remove after hiding
-    toast.addEventListener('hidden.bs.toast', () => {
-        toast.remove();
-    });
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.remove();
+        }
+    }, 5000);
 }
 
-async function uploadLogs() {
-    const fileInput = document.getElementById('fileInput');
-    const logType = document.getElementById('logType').value;
-    
-    if (fileInput.files.length === 0) {
-        showToast('Please select log files to upload', 'warning');
-        return;
-    }
-    
-    const uploadBtn = document.getElementById('uploadBtn');
-    uploadBtn.disabled = true;
-    uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Uploading...';
-    
-    try {
-        const formData = new FormData();
-        
-        // Add each file
-        for (let i = 0; i < fileInput.files.length; i++) {
-            formData.append('files', fileInput.files[i]);
-        }
-        formData.append('log_type', logType);
-        
-        console.log('Uploading files:', Array.from(fileInput.files).map(f => f.name));
-        
-        const response = await fetch(`${API_BASE}/upload-logs`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`);
-        }
-        
-        const result = await response.json();
-        
-        console.log('Upload result:', result);
-        
-        if (result.files_processed) {
-            const failedFiles = result.files_processed.filter(f => f.error);
-            const successFiles = result.files_processed.filter(f => !f.error);
-            
-            if (failedFiles.length > 0) {
-                showToast(`${failedFiles.length} file(s) failed to process`, 'warning');
-            }
-            
-            if (successFiles.length > 0) {
-                showToast(`Successfully processed ${successFiles.length} file(s) with ${result.total_records} log entries`, 'success');
-            }
-        }
-        
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
-        if (modal) {
-            modal.hide();
-        }
-        
-        // Wait a moment for backend to process, then reload current view
-        setTimeout(() => {
-            switch(currentView) {
-                case 'dashboard':
-                    loadDashboardData();
-                    break;
-                case 'logs':
-                    loadLogs();
-                    break;
-                case 'analytics':
-                    loadAnalytics();
-                    break;
-                case 'historical':
-                    loadHistoricalMetrics();
-                    loadPeriodComparison();
-                    break;
-                case 'timeline':
-                    loadTimelineViewData();
-                    break;
-                case 'alerts':
-                    loadAlerts();
-                    break;
-                case 'enhancedAnalytics':
-                    loadEnhancedAnalytics();
-                    break;
-            }
-        }, 1000);
-        
-        // Reset file input
-        fileInput.value = '';
-        document.getElementById('fileList').innerHTML = '';
-        
-    } catch (error) {
-        console.error('Upload error:', error);
-        showToast(`Error uploading files: ${error.message}`, 'danger');
-    } finally {
-        uploadBtn.disabled = false;
-        uploadBtn.innerHTML = '<i class="fas fa-upload me-1"></i> Upload & Analyze';
-    }
+function getToastIcon(type) {
+    const icons = {
+        success: 'check-circle',
+        danger: 'exclamation-circle',
+        warning: 'exclamation-triangle',
+        info: 'info-circle'
+    };
+    return icons[type] || 'info-circle';
 }
 
-// Logs Filter Functions
-function filterLogs() {
-    const modal = new bootstrap.Modal(document.getElementById('filterModal'));
-    modal.show();
-}
-
-function applyFilters() {
-    // Get filter values
-    const ipFilter = document.getElementById('filterIp').value;
-    const statusFilter = document.getElementById('filterStatus').value;
-    const timeRange = document.getElementById('filterTimeRange').value;
-    
-    // Build query string
-    let query = `page=1&limit=100`;
-    
-    if (ipFilter) query += `&ip_filter=${encodeURIComponent(ipFilter)}`;
-    if (statusFilter) query += `&status_filter=${statusFilter}`;
-    
-    // Convert time range to start time
-    if (timeRange !== 'all') {
-        const now = new Date();
-        let startTime;
-        
-        switch (timeRange) {
-            case '1h':
-                startTime = new Date(now.getTime() - 60 * 60 * 1000);
-                break;
-            case '24h':
-                startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                break;
-            case '7d':
-                startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                break;
-        }
-        
-        if (startTime) {
-            query += `&time_start=${startTime.toISOString()}`;
-        }
-    }
-    
-    // Load logs with filters
-    loadFilteredLogs(query);
-    
-    // Close modal
-    const modal = bootstrap.Modal.getInstance(document.getElementById('filterModal'));
-    if (modal) {
-        modal.hide();
-    }
-}
-
-async function loadFilteredLogs(query) {
-    try {
-        const response = await fetch(`${API_BASE}/logs?${query}`);
-        if (!response.ok) {
-            throw new Error(`Filter API error: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        updateLogsTable(data.logs || []);
-        
-        logsTotalPages = data.pagination?.pages || 1;
-        currentLogsPage = 1;
-        document.getElementById('logsPageInfo').textContent = 
-            `Page ${currentLogsPage} of ${logsTotalPages}`;
-        
-    } catch (error) {
-        console.error('Error loading filtered logs:', error);
-        showToast('Error loading filtered logs', 'danger');
-    }
-}
-
-function searchLogs() {
-    const searchTerm = document.getElementById('searchLogs').value.toLowerCase();
-    const rows = document.querySelectorAll('#logsTable tr');
-    
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(searchTerm) ? '' : 'none';
-    });
-}
-
-function changeLogsPage(delta) {
-    const newPage = currentLogsPage + delta;
-    
-    if (newPage >= 1 && newPage <= logsTotalPages) {
-        currentLogsPage = newPage;
-        loadLogs();
-    }
+function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container-pro';
+    document.body.appendChild(container);
+    return container;
 }
 
 // Export Functions
-async function exportData() {
+async function exportToCSV() {
     try {
-        const response = await fetch(`${API_BASE}/export?format=csv`);
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'nginx_logs_export.csv';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-            
-            showToast('Export started successfully', 'success');
-        } else {
-            showToast('Error exporting data', 'danger');
+        const data = await fetchData('/api/export-analytics?format=csv');
+        if (data.csv_data) {
+            downloadFile(data.csv_data, 'analytics.csv', 'text/csv');
+            showToast('CSV export started', 'success');
         }
     } catch (error) {
         console.error('Export error:', error);
-        showToast('Error exporting data', 'danger');
+        showToast('Export failed', 'danger');
     }
 }
 
+async function exportToJSON() {
+    try {
+        const data = await fetchData('/api/export-analytics?format=json');
+        downloadFile(JSON.stringify(data, null, 2), 'analytics.json', 'application/json');
+        showToast('JSON export started', 'success');
+    } catch (error) {
+        console.error('Export error:', error);
+        showToast('Export failed', 'danger');
+    }
+}
+
+async function exportToPDF() {
+    showToast('PDF export feature coming soon', 'info');
+    // Implement PDF export using jsPDF or similar library
+}
+
+function downloadFile(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
 // Real-time Functions
-function toggleRealtime() {
-    const toggle = document.getElementById('realtimeToggle');
-    realtimeEnabled = toggle.checked;
+function initRealtimeUpdates() {
+    // Connect to WebSocket for real-time updates
+    connectWebSocket();
     
-    const statusBadge = document.getElementById('realtimeStatus');
-    
-    if (realtimeEnabled) {
-        statusBadge.innerHTML = '<i class="fas fa-circle me-1"></i> Real-time: ON';
-        statusBadge.style.background = '#10b981';
-        connectWebSocket();
-    } else {
-        statusBadge.innerHTML = '<i class="fas fa-circle me-1"></i> Real-time: OFF';
-        statusBadge.style.background = '#dc2626';
-        disconnectWebSocket();
+    // Set up periodic updates
+    setInterval(() => {
+        if (currentView === 'dashboard') {
+            refreshDashboardMetrics();
+        }
+    }, 30000); // Update every 30 seconds
+}
+
+async function refreshDashboardMetrics() {
+    try {
+        const metrics = await fetchData('/api/metrics?time_range=1h');
+        updateProfessionalStatsCards(metrics);
+    } catch (error) {
+        console.error('Error refreshing metrics:', error);
     }
 }
 
@@ -2445,118 +979,157 @@ function connectWebSocket() {
         return;
     }
     
-    // Fix WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/logs`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/analytics`;
     
     websocket = new WebSocket(wsUrl);
     
     websocket.onopen = () => {
-        console.log('WebSocket connected');
-        showToast('Real-time monitoring connected', 'success');
+        console.log('WebSocket connected for real-time analytics');
+        showToast('Real-time analytics connected', 'success');
     };
     
     websocket.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        
-        if (data.type === 'heartbeat') {
-            // Keep-alive heartbeat
-            return;
-        }
-        
-        // Handle incoming log data
-        if (currentView === 'realtime') {
-            addRealtimeLog(data);
-        }
+        handleRealtimeUpdate(data);
     };
     
     websocket.onerror = (error) => {
         console.error('WebSocket error:', error);
-        showToast('Real-time connection error', 'danger');
     };
     
     websocket.onclose = () => {
         console.log('WebSocket disconnected');
-        if (realtimeEnabled) {
-            // Try to reconnect after 5 seconds
-            setTimeout(connectWebSocket, 5000);
-        }
+        // Try to reconnect after 5 seconds
+        setTimeout(connectWebSocket, 5000);
     };
 }
 
-function disconnectWebSocket() {
-    if (websocket) {
-        websocket.close();
-        websocket = null;
+function handleRealtimeUpdate(data) {
+    if (data.type === 'analytics_update') {
+        // Update dashboard with real-time data
+        if (currentView === 'dashboard') {
+            updateProfessionalStatsCards(data.metrics);
+            
+            // Add real-time notification for new alerts
+            if (data.alerts_count > lastAlertCount) {
+                showNewAlertNotification(data.alerts_count - lastAlertCount);
+            }
+            lastAlertCount = data.alerts_count;
+        }
     }
 }
 
-function addRealtimeLog(logData) {
-    const tableBody = document.getElementById('realtimeTable');
-    if (!tableBody) return;
-    
-    // Insert at beginning
-    const time = new Date().toLocaleTimeString();
-    
-    const row = document.createElement('tr');
-    row.className = 'log-row';
-    row.innerHTML = `
-        <td><small>${time}</small></td>
-        <td><span class="ip-badge">${logData.client_ip || 'Unknown'}</span></td>
-        <td><span class="badge bg-light text-dark">${logData.method || 'GET'}</span></td>
-        <td><small>${truncateText(logData.endpoint || '', 40)}</small></td>
-        <td><span class="status-${Math.floor((logData.status || 200)/100)}xx fw-bold">${logData.status || 200}</span></td>
+let lastAlertCount = 0;
+
+function showNewAlertNotification(count) {
+    const notification = document.createElement('div');
+    notification.className = 'alert-notification';
+    notification.innerHTML = `
+        <i class="fas fa-shield-alt"></i>
+        <span>${count} new security alert${count > 1 ? 's' : ''} detected</span>
+        <button onclick="this.parentElement.remove()">
+            <i class="fas fa-times"></i>
+        </button>
     `;
     
-    tableBody.insertBefore(row, tableBody.firstChild);
+    document.body.appendChild(notification);
     
-    // Limit number of rows
-    if (tableBody.children.length > 100) {
-        tableBody.removeChild(tableBody.lastChild);
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.remove();
+        }
+    }, 5000);
+}
+
+// View Switching
+function switchView(viewName) {
+    // Hide all views
+    document.querySelectorAll('.view-content').forEach(view => {
+        view.style.display = 'none';
+    });
+    
+    // Show selected view
+    const viewElement = document.getElementById(viewName + 'View');
+    if (viewElement) {
+        viewElement.style.display = 'block';
     }
-}
-
-function clearRealtimeLogs() {
-    const tableBody = document.getElementById('realtimeTable');
-    if (tableBody) {
-        tableBody.innerHTML = '';
-    }
-}
-
-// Modal Functions
-function showUploadModal() {
-    const modal = new bootstrap.Modal(document.getElementById('uploadModal'));
-    modal.show();
-}
-
-// Initialize empty charts
-function initializeCharts() {
-    // Initialize with empty data for charts
-    const emptyData = { labels: [], values: [] };
     
-    // Initialize all chart canvases
-    const charts = ['timelineChart', 'topIpsChart', 'statusChart', 'endpointsChart', 'userAgentsChart', 'methodsChart'];
-    
-    charts.forEach(chartId => {
-        const canvas = document.getElementById(chartId);
-        if (canvas) {
-            const ctx = canvas.getContext('2d');
-            new Chart(ctx, {
-                type: chartId.includes('timeline') ? 'line' : 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: '#e5e7eb'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { display: false }
-                    }
-                }
-            });
+    // Update active state
+    document.querySelectorAll('.view-switcher').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.view === viewName) {
+            btn.classList.add('active');
         }
     });
+    
+    // Load view-specific data
+    currentView = viewName;
+    loadViewData(viewName);
 }
+
+function loadViewData(viewName) {
+    switch (viewName) {
+        case 'dashboard':
+            loadDashboardData();
+            break;
+        case 'analytics':
+            loadAdvancedAnalytics();
+            break;
+        case 'geo':
+            loadGeographicData();
+            break;
+        case 'security':
+            loadSecurityData();
+            break;
+        case 'performance':
+            loadPerformanceData();
+            break;
+        default:
+            break;
+    }
+}
+
+async function loadGeographicData() {
+    try {
+        const geoData = await fetchData('/api/geo-distribution');
+        updateGeoVisualization(geoData);
+    } catch (error) {
+        console.error('Error loading geographic data:', error);
+    }
+}
+
+async function loadSecurityData() {
+    try {
+        const securityData = await fetchData('/api/advanced-analytics');
+        updateSecurityMetrics(securityData.security);
+    } catch (error) {
+        console.error('Error loading security data:', error);
+    }
+}
+
+async function loadPerformanceData() {
+    try {
+        const performanceData = await fetchData('/api/advanced-analytics');
+        updatePerformanceMetrics(performanceData.performance);
+    } catch (error) {
+        console.error('Error loading performance data:', error);
+    }
+}
+
+// Initialize tooltips
+function initTooltips() {
+    // Initialize Bootstrap tooltips if available
+    if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+        const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+    }
+}
+
+// Make functions available globally
+window.switchView = switchView;
+window.viewAlertDetails = viewAlertDetails;
+window.exportToCSV = exportToCSV;
+window.exportToJSON = exportToJSON;
+window.exportToPDF = exportToPDF;
