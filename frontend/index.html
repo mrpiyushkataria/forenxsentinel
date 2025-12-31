@@ -123,6 +123,46 @@
             margin-bottom: 2rem;
         }
         
+        .chart-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            height: 100%;
+        }
+        
+        .chart-card h6 {
+            color: var(--dark);
+            font-weight: 600;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            text-align: center;
+            line-height: 24px;
+            font-weight: bold;
+            font-size: 0.75rem;
+            margin-right: 0.5rem;
+        }
+        
+        .status-2xx { background-color: #10b981; color: white; }
+        .status-3xx { background-color: #f59e0b; color: white; }
+        .status-4xx { background-color: #ef4444; color: white; }
+        .status-5xx { background-color: #dc2626; color: white; }
+        
+        .method-GET { background: #dbeafe; color: #1d4ed8; }
+        .method-POST { background: #dcfce7; color: #166534; }
+        .method-PUT { background: #fef3c7; color: #92400e; }
+        .method-DELETE { background: #fee2e2; color: #991b1b; }
+        .method-PATCH { background: #f3e8ff; color: #7c3aed; }
+        
         .upload-zone {
             border: 3px dashed var(--border);
             border-radius: 15px;
@@ -211,7 +251,10 @@
                         <i class="fas fa-exclamation-triangle me-2"></i> Security Alerts
                     </div>
                     <div class="sidebar-item" onclick="showAnalyticsView()">
-                        <i class="fas fa-chart-bar me-2"></i> Analytics
+                        <i class="fas fa-chart-bar me-2"></i> Basic Analytics
+                    </div>
+                    <div class="sidebar-item" onclick="showEnhancedAnalytics()">
+                        <i class="fas fa-chart-network me-2"></i> Enhanced Analytics
                     </div>
                     <div class="sidebar-item" onclick="showHistoricalView()">
                         <i class="fas fa-chart-line me-2"></i> Historical Analytics
@@ -266,6 +309,7 @@
                                                     <option value="24h" selected>Last 24 Hours</option>
                                                     <option value="7d">Last 7 Days</option>
                                                     <option value="30d">Last 30 Days</option>
+                                                    <option value="all">All Time</option>
                                                 </select>
                                             </div>
                                             <div class="col-auto">
@@ -376,7 +420,7 @@
                             </div>
                         </div>
 
-                        <!-- Analytics View -->
+                        <!-- Basic Analytics View -->
                         <div id="analyticsView" style="display: none;">
                             <div class="row">
                                 <div class="col-lg-6">
@@ -395,6 +439,98 @@
                             <div class="chart-container mt-4">
                                 <h5>Request Methods Distribution</h5>
                                 <canvas id="methodsChart" height="200"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Enhanced Analytics View -->
+                        <div id="enhancedAnalyticsView" style="display: none;">
+                            <!-- Status Code Analysis Section -->
+                            <div class="chart-container">
+                                <h5><i class="fas fa-chart-pie me-2"></i>Status Code Analysis</h5>
+                                <div class="row">
+                                    <div class="col-lg-4">
+                                        <div class="chart-card">
+                                            <h6>Status Code Distribution</h6>
+                                            <canvas id="statusDonutChart" height="250"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-8">
+                                        <div class="chart-card">
+                                            <h6>Status Code Trends Over Time</h6>
+                                            <canvas id="statusTrendChart" height="250"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-4">
+                                    <div class="chart-card">
+                                        <h6>Top Status Codes</h6>
+                                        <canvas id="statusBarChart" height="200"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Endpoint Analysis Section -->
+                            <div class="chart-container mt-4">
+                                <h5><i class="fas fa-route me-2"></i>Endpoint Analysis</h5>
+                                <div class="row">
+                                    <div class="col-lg-8">
+                                        <div class="chart-card">
+                                            <h6>Top Endpoints by Traffic</h6>
+                                            <canvas id="endpointTrafficChart" height="300"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <div class="chart-card">
+                                            <h6>Endpoint Details</h6>
+                                            <div id="endpointDetails" class="mt-3">
+                                                <div class="alert alert-light">
+                                                    <small>Click on an endpoint in the chart to see details</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Pattern Analysis Section -->
+                            <div class="chart-container mt-4">
+                                <h5><i class="fas fa-clock me-2"></i>Pattern Analysis</h5>
+                                <div class="row">
+                                    <div class="col-lg-6">
+                                        <div class="chart-card">
+                                            <h6>Hourly Traffic Pattern</h6>
+                                            <canvas id="hourlyPatternChart" height="250"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-6">
+                                        <div class="chart-card">
+                                            <h6>Daily Traffic Pattern</h6>
+                                            <canvas id="dailyPatternChart" height="250"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Detailed Endpoint Statistics -->
+                            <div class="chart-container mt-4">
+                                <h5><i class="fas fa-table me-2"></i>Detailed Endpoint Statistics</h5>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Endpoint</th>
+                                                <th>Requests</th>
+                                                <th>Methods</th>
+                                                <th>Top Status</th>
+                                                <th>Avg Bytes</th>
+                                                <th>Total Bytes</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="endpointStatsTable">
+                                            <tr><td colspan="6" class="text-center">Loading endpoint statistics...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
 
@@ -442,20 +578,6 @@
                                     <div class="chart-container">
                                         <h5>Monthly Summary</h5>
                                         <canvas id="monthlyChart" height="250"></canvas>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="chart-container mt-4">
-                                <h5>Hourly Distribution Patterns</h5>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <h6 class="text-center">Weekdays</h6>
-                                        <canvas id="weekdayChart" height="200"></canvas>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h6 class="text-center">Weekends</h6>
-                                        <canvas id="weekendChart" height="200"></canvas>
                                     </div>
                                 </div>
                             </div>
