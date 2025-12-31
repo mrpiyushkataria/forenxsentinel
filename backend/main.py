@@ -433,41 +433,48 @@ async def get_timeline(
     interval: str = "hour",
     time_range: str = "24h"
 ):
-    """Get timeline data for charts - WITH TIME FILTERING"""
+    """Get timeline data for charts - FIXED VERSION FOR OLD LOGS"""
     logger.info(f"Getting timeline data, interval: {interval}, time_range: {time_range}")
     
     if not logs_data["parsed_logs"]:
         logger.info("No parsed logs found, returning empty")
         return {"timestamps": [], "request_counts": []}
     
-    # Calculate time window based on time_range
-    now = datetime.now(timezone.utc)
-    start_time = None
-    
-    if time_range == "1h":
-        start_time = now - timedelta(hours=1)
-    elif time_range == "6h":
-        start_time = now - timedelta(hours=6)
-    elif time_range == "24h":
-        start_time = now - timedelta(hours=24)
-    elif time_range == "7d":
-        start_time = now - timedelta(days=7)
-    elif time_range == "30d":
-        start_time = now - timedelta(days=30)
-    else:
-        # Default to all logs
-        start_time = None
-    
-    # Filter logs by time if start_time is specified
-    if start_time:
-        filtered_logs = []
-        for log in logs_data["parsed_logs"]:
-            if hasattr(log, 'timestamp'):
-                # Check if log timestamp is within range
-                if log.timestamp >= start_time:
-                    filtered_logs.append(log)
-    else:
+    # For old logs, we need to handle special case
+    if time_range == "all":
+        # Show all data without time filtering
         filtered_logs = logs_data["parsed_logs"]
+        logger.info(f"Using ALL logs: {len(filtered_logs)}")
+    else:
+        # Calculate time window based on time_range
+        now = datetime.now(timezone.utc)
+        start_time = None
+        
+        if time_range == "1h":
+            start_time = now - timedelta(hours=1)
+        elif time_range == "6h":
+            start_time = now - timedelta(hours=6)
+        elif time_range == "24h":
+            start_time = now - timedelta(hours=24)
+        elif time_range == "7d":
+            start_time = now - timedelta(days=7)
+        elif time_range == "30d":
+            start_time = now - timedelta(days=30)
+        else:
+            # Default to all logs
+            start_time = None
+            filtered_logs = logs_data["parsed_logs"]
+        
+        # Filter logs by time if start_time is specified
+        if start_time:
+            filtered_logs = []
+            for log in logs_data["parsed_logs"]:
+                if hasattr(log, 'timestamp'):
+                    # Check if log timestamp is within range
+                    if log.timestamp >= start_time:
+                        filtered_logs.append(log)
+        else:
+            filtered_logs = logs_data["parsed_logs"]
     
     logger.info(f"Filtered logs for timeline: {len(filtered_logs)} out of {len(logs_data['parsed_logs'])}")
     
@@ -506,6 +513,208 @@ async def get_timeline(
     
     logger.info(f"Returning timeline data: {len(result['timestamps'])} time points")
     return result
+
+
+
+@app.get("/api/endpoint-analysis")
+async def get_endpoint_analysis(limit: int = 20):
+    """Get detailed endpoint analysis"""
+    if not logs_data["parsed_logs"]:
+        return {"endpoints": [], "methods_by_endpoint": {}, "status_by_endpoint": {}}
+    
+    logs = logs_data["parsed_logs"]
+    
+    # Analyze endpoints
+    endpoint_stats = {}
+    method_distribution = {}
+    status_distribution = {}
+    
+    for log in logs:
+        if hasattr(log, 'endpoint'):
+            endpoint = log.endpoint
+            
+            # Initialize endpoint stats
+            if endpoint not in endpoint_stats:
+                endpoint_stats[endpoint] = {
+                    "count": 0,
+                    "methods": {},
+                    "status_codes": {},
+                    "avg_bytes": 0,
+                    "total_bytes": 0
+                }
+            
+            stats = endpoint_stats[endpoint]
+            stats["count"] += 1
+            
+            # Track methods
+            if hasattr(log, 'method'):
+                method = log.method
+                if method not in stats["methods"]:
+                    stats["methods"][method] = 0
+                stats["methods"][method] += 1
+            
+            # Track status codes
+            if hasattr(log, 'status'):
+                status = str(log.status)
+                if status not in stats["status_codes"]:
+                    stats["status_codes"][status] = 0
+                stats["status_codes"][status] += 1
+            
+            # Track bytes
+            if hasattr(log, 'bytes_sent') and log.bytes_sent:
+                try:
+                    stats["total_bytes"] += int(log.bytes_sent)
+                except:
+                    pass
+    
+    # Calculate averages
+    for endpoint, stats in endpoint_stats.items():
+        if stats["count"] > 0:
+            stats["avg_bytes"] = stats["total_bytes"] / stats["count"]
+    
+    # Sort endpoints by request count
+    sorted_endpoints = sorted(
+        endpoint_stats.items(),
+        key=lambda x: x[1]["count"],
+        reverse=True
+    )[:limit]
+    
+    # Prepare response
+    result = {
+        "endpoints": [
+            {
+                "endpoint": endpoint,
+                "count": stats["count"],
+                "methods": stats["methods"],
+                "status_codes": stats["status_codes"],
+                "avg_bytes": stats["avg_bytes"],
+                "total_bytes": stats["total_bytes"]
+            }
+            for endpoint, stats in sorted_endpoints
+        ],
+        "total_endpoints": len(endpoint_stats),
+        "top_endpoints_count": len(sorted_endpoints)
+    }
+    
+    return result
+
+
+@app.get("/api/pattern-analysis")
+async def get_pattern_analysis():
+    """Analyze patterns in logs (hourly patterns, daily patterns, etc.)"""
+    if not logs_data["parsed_logs"]:
+        return {
+            "hourly_patterns": {},
+            "daily_patterns": {},
+            "status_patterns": {},
+            "method_patterns": {}
+        }
+    
+    logs = logs_data["parsed_logs"]
+    
+    # Hourly patterns
+    hourly_counts = {}
+    for hour in range(24):
+        hourly_counts[f"{hour:02d}:00"] = 0
+    
+    # Daily patterns
+    daily_counts = {
+        "Monday": 0, "Tuesday": 0, "Wednesday": 0,
+        "Thursday": 0, "Friday": 0, "Saturday": 0, "Sunday": 0
+    }
+    
+    # Status patterns by hour
+    status_by_hour = {}
+    
+    for log in logs:
+        if hasattr(log, 'timestamp'):
+            hour = log.timestamp.hour
+            hour_key = f"{hour:02d}:00"
+            weekday = log.timestamp.strftime("%A")
+            
+            # Hourly count
+            if hour_key in hourly_counts:
+                hourly_counts[hour_key] += 1
+            
+            # Daily count
+            if weekday in daily_counts:
+                daily_counts[weekday] += 1
+            
+            # Status by hour
+            if hasattr(log, 'status'):
+                status = str(log.status)
+                if hour_key not in status_by_hour:
+                    status_by_hour[hour_key] = {}
+                if status not in status_by_hour[hour_key]:
+                    status_by_hour[hour_key][status] = 0
+                status_by_hour[hour_key][status] += 1
+    
+    return {
+        "hourly_patterns": hourly_counts,
+        "daily_patterns": daily_counts,
+        "status_patterns": status_by_hour,
+        "total_logs": len(logs)
+    }
+
+
+@app.get("/api/status-analysis")
+async def get_status_analysis(detailed: bool = False):
+    """Get detailed status code analysis with trends"""
+    if not logs_data["parsed_logs"]:
+        return {"status_codes": {}, "trends": {}, "detailed": detailed}
+    
+    logs = logs_data["parsed_logs"]
+    
+    # Group by status code categories
+    status_data = {
+        "2xx": {"count": 0, "codes": {}},
+        "3xx": {"count": 0, "codes": {}},
+        "4xx": {"count": 0, "codes": {}},
+        "5xx": {"count": 0, "codes": {}}
+    }
+    
+    # Track status codes over time for trends
+    status_timeline = {}
+    
+    for log in logs:
+        if hasattr(log, 'status') and hasattr(log, 'timestamp'):
+            status = str(log.status)
+            status_category = status[0] + "xx"
+            
+            # Count by category
+            if status_category in status_data:
+                status_data[status_category]["count"] += 1
+            
+            # Count individual codes if detailed
+            if detailed:
+                if status not in status_data[status_category]["codes"]:
+                    status_data[status_category]["codes"][status] = 0
+                status_data[status_category]["codes"][status] += 1
+            
+            # Timeline data - by day
+            day_key = log.timestamp.strftime("%Y-%m-%d")
+            if day_key not in status_timeline:
+                status_timeline[day_key] = {
+                    "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0,
+                    "total": 0
+                }
+            
+            if status_category in status_timeline[day_key]:
+                status_timeline[day_key][status_category] += 1
+            status_timeline[day_key]["total"] += 1
+    
+    # Calculate percentages
+    total_requests = len(logs)
+    for category in status_data:
+        count = status_data[category]["count"]
+        status_data[category]["percentage"] = (count / total_requests * 100) if total_requests > 0 else 0
+    
+    return {
+        "status_codes": status_data,
+        "trends": status_timeline,
+        "detailed": detailed,
+        "total_requests": total_requests
+    }
 
 
 @app.get("/api/historical/metrics")
